@@ -155,10 +155,17 @@ td.pivo { background: #fff0b3; font-weight: 700; text-decoration: underline; }
 .controles { display: flex; gap: 14px; align-items: center; font-size: .88rem; }
 .controles label { font-weight: 400; display: flex; gap: 6px; align-items: center; cursor: pointer; }
 .controles input { width: auto; }
+.dica-zoom { font-size: .82rem; color: var(--suave); margin: 0 0 10px; }
 .graficos { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; }
-.graficos figure { margin: 0; background: var(--papel); border: 1px solid var(--borda); border-radius: 4px; padding: 10px; }
+.graficos figure { position: relative; margin: 0; background: var(--papel); border: 1px solid var(--borda); border-radius: 4px; padding: 10px; }
 .graficos figcaption { font-size: .82rem; color: var(--suave); margin-top: 6px; }
 canvas { display: block; width: 100%; cursor: crosshair; }
+.btn-reset-zoom {
+  position: absolute; top: 18px; right: 18px; z-index: 2;
+  background: var(--papel); border: 1px solid var(--borda); border-radius: 4px;
+  padding: 3px 10px; font-size: .78rem; color: var(--acento); cursor: pointer; font-family: inherit;
+}
+.btn-reset-zoom:hover { background: var(--acento-claro); }
 .dica-flutuante { position: fixed; z-index: 10; pointer-events: none; padding: 5px 9px; border-radius: 3px; font-size: .8rem; background: #1f2328; color: #fff; font-family: ui-monospace, Menlo, monospace; }
 
 /* ---------- Gauss ---------- */
@@ -188,7 +195,7 @@ details.passo-gauss[open] summary { margin-bottom: 6px; color: var(--acento); }
 /* Impressão: só o resultado (enunciado + tabela + gráficos) */
 @media print {
   body { background: #fff; }
-  .abas, .formulario, .exemplos, .como, .controles, .acoes, .tabela-acoes, #gauss-limpar, .passos-barra button, .vazio { display: none !important; }
+  .abas, .formulario, .exemplos, .como, .controles, .acoes, .tabela-acoes, .dica-zoom, .btn-reset-zoom, #gauss-limpar, .passos-barra button, .vazio { display: none !important; }
   .painel[hidden] { display: none !important; }
   main, .topo { max-width: none; padding: 0; }
   .tabela-rolagem { max-height: none; overflow: visible; }
