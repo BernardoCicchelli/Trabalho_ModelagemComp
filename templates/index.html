@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cálculo Numérico</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topo">
+    <h1>Cálculo Numérico</h1>
+    <p>Métodos para equações não lineares e sistemas lineares</p>
+  </header>
+
+  <nav class="abas" role="tablist" aria-label="Métodos">
+    <button class="aba ativa" role="tab" aria-selected="true" data-alvo="fp">Falsa posição</button>
+    <button class="aba" role="tab" aria-selected="false" data-alvo="newton">Newton-Raphson</button>
+    <button class="aba" role="tab" aria-selected="false" data-alvo="gauss">Eliminação de Gauss</button>
+  </nav>
+
+  <main>
+    <!-- ================= FALSA POSIÇÃO ================= -->
+    <section id="fp" class="painel" role="tabpanel">
+      <h2>Método da Falsa Posição</h2>
+      <p class="lead">Encontra uma raiz de f(x) = 0 dentro de um intervalo [a, b] em que f troca de sinal.</p>
+
+      <details class="como">
+        <summary>Como funciona</summary>
+        <div class="formula">x<sub>k</sub> = ( a·f(b) − b·f(a) ) / ( f(b) − f(a) )</div>
+        <ul>
+          <li>Traça a reta que liga (a, f(a)) a (b, f(b)); o ponto onde ela corta o eixo x é a nova aproximação x<sub>k</sub>.</li>
+          <li>O extremo que tem o mesmo sinal de f(x<sub>k</sub>) é substituído por x<sub>k</sub>, e o processo se repete.</li>
+          <li><b>Condições:</b> f contínua em [a, b] e f(a)·f(b) &lt; 0 (Teorema de Bolzano).</li>
+          <li>A convergência é linear (ordem 1).</li>
+        </ul>
+      </details>
+
+      <div class="exemplos" id="ex-fp"></div>
+
+      <form id="form-fp" class="formulario" autocomplete="off" novalidate>
+        <fieldset>
+          <legend><span class="num">1</span> Problema</legend>
+          <div class="campo largo">
+            <label for="fp-f">Função f(x)</label>
+            <input id="fp-f" name="f" value="x**3 - x - 2" placeholder="ex.: cos(x) - x">
+            <div class="insere">Inserir:
+              <button type="button" data-ins="sin()">sin</button>
+              <button type="button" data-ins="cos()">cos</button>
+              <button type="button" data-ins="tan()">tan</button>
+              <button type="button" data-ins="exp()">exp</button>
+              <button type="button" data-ins="log()">log</button>
+              <button type="button" data-ins="sqrt()">√</button>
+              <button type="button" data-ins="pi">π</button>
+              <button type="button" data-ins="**">xⁿ</button>
+            </div>
+            <small class="dica">Use <code>*</code> para multiplicar e <code>**</code> (ou <code>^</code>) para potência. Exemplo: <code>cos(x) - x</code>.</small>
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend><span class="num">2</span> Parâmetros</legend>
+          <div class="grade-campos">
+            <div class="campo"><label for="fp-a">a</label><input id="fp-a" name="a" value="1"><small class="dica">Extremo esquerdo do intervalo</small></div>
+            <div class="campo"><label for="fp-b">b</label><input id="fp-b" name="b" value="2"><small class="dica">Extremo direito (maior que a)</small></div>
+            <div class="campo"><label for="fp-tol">Tolerância</label><input id="fp-tol" name="tol" value="1e-8"><small class="dica">Quanto menor, mais preciso</small></div>
+            <div class="campo"><label for="fp-max">Máximo de iterações</label><input id="fp-max" name="max_iter" value="100"><small class="dica">Evita repetir para sempre</small></div>
+          </div>
+          <p class="nota-criterio">Critério de parada: erro relativo |x<sub>k</sub> − x<sub>k−1</sub>| / |x<sub>k</sub>| ≤ tolerância. Os números aceitam <code>0,5</code>, <code>1e-8</code>, <code>1/3</code> e <code>pi/2</code>.</p>
+        </fieldset>
+        <button type="submit" class="principal">Calcular</button>
+      </form>
+      <div class="resultado" id="res-fp" aria-live="polite"></div>
+    </section>
+
+    <!-- ================= NEWTON ================= -->
+    <section id="newton" class="painel" role="tabpanel" hidden>
+      <h2>Método de Newton-Raphson</h2>
+      <p class="lead">A partir de um chute inicial x₀, usa a reta tangente para chegar cada vez mais perto de uma raiz de f(x) = 0.</p>
+
+      <details class="como">
+        <summary>Como funciona</summary>
+        <div class="formula">x<sub>k+1</sub> = x<sub>k</sub> − f(x<sub>k</sub>) / f′(x<sub>k</sub>)</div>
+        <ul>
+          <li>Em cada passo, a tangente ao gráfico em x<sub>k</sub> corta o eixo x em x<sub>k+1</sub>.</li>
+          <li>A derivada f′(x) é calculada automaticamente (simbolicamente) e mostrada no resultado.</li>
+          <li><b>Condições:</b> f derivável, f′(x<sub>k</sub>) ≠ 0 e x₀ suficientemente próximo da raiz (convergência local).</li>
+          <li>Numa raiz simples a convergência é quadrática (ordem 2); numa raiz múltipla vira linear.</li>
+        </ul>
+      </details>
+
+      <div class="exemplos" id="ex-newton"></div>
+
+      <form id="form-newton" class="formulario" autocomplete="off" novalidate>
+        <fieldset>
+          <legend><span class="num">1</span> Problema</legend>
+          <div class="campo largo">
+            <label for="nw-f">Função f(x)</label>
+            <input id="nw-f" name="f" value="x**3 - x - 2" placeholder="ex.: cos(x) - x">
+            <div class="insere">Inserir:
+              <button type="button" data-ins="sin()">sin</button>
+              <button type="button" data-ins="cos()">cos</button>
+              <button type="button" data-ins="tan()">tan</button>
+              <button type="button" data-ins="exp()">exp</button>
+              <button type="button" data-ins="log()">log</button>
+              <button type="button" data-ins="sqrt()">√</button>
+              <button type="button" data-ins="pi">π</button>
+              <button type="button" data-ins="**">xⁿ</button>
+            </div>
+            <small class="dica">Use <code>*</code> para multiplicar e <code>**</code> (ou <code>^</code>) para potência. Exemplo: <code>cos(x) - x</code>.</small>
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend><span class="num">2</span> Parâmetros</legend>
+          <div class="grade-campos">
+            <div class="campo"><label for="nw-x0">x₀ (chute inicial)</label><input id="nw-x0" name="x0" value="1,5"><small class="dica">Quanto mais perto da raiz, melhor</small></div>
+            <div class="campo"><label for="nw-tol">Tolerância</label><input id="nw-tol" name="tol" value="1e-8"><small class="dica">Quanto menor, mais preciso</small></div>
+            <div class="campo"><label for="nw-max">Máximo de iterações</label><input id="nw-max" name="max_iter" value="100"><small class="dica">Evita repetir para sempre</small></div>
+          </div>
+          <p class="nota-criterio">Critério de parada: erro relativo |x<sub>k</sub> − x<sub>k−1</sub>| / |x<sub>k</sub>| ≤ tolerância. Os números aceitam <code>0,5</code>, <code>1e-8</code>, <code>1/3</code> e <code>pi/2</code>.</p>
+        </fieldset>
+        <button type="submit" class="principal">Calcular</button>
+      </form>
+      <div class="resultado" id="res-newton" aria-live="polite"></div>
+    </section>
+
+    <!-- ================= GAUSS ================= -->
+    <section id="gauss" class="painel" role="tabpanel" hidden>
+      <h2>Eliminação de Gauss com pivoteamento parcial</h2>
+      <p class="lead">Resolve um sistema linear Ax = b transformando-o em um sistema triangular.</p>
+
+      <details class="como">
+        <summary>Como funciona</summary>
+        <div class="formula">L<sub>i</sub> ← L<sub>i</sub> − m<sub>i</sub>·L<sub>k</sub>, &nbsp; m<sub>i</sub> = a<sub>ik</sub> / a<sub>kk</sub></div>
+        <ul>
+          <li>Em cada coluna k, a linha com maior |a<sub>ik</sub>| é trazida para a posição do pivô (pivoteamento parcial).</li>
+          <li>Os elementos abaixo do pivô são zerados com os multiplicadores m<sub>i</sub>; depois a solução sai por substituição retroativa.</li>
+          <li>Determinante = produto dos pivôs × (−1)<sup>trocas de linha</sup>.</li>
+          <li>Se não há pivô, o sistema é classificado pelo Teorema de Rouché-Capelli: impossível ou indeterminado.</li>
+        </ul>
+      </details>
+
+      <div class="exemplos" id="ex-gauss"></div>
+
+      <form id="form-gauss" class="formulario" autocomplete="off" novalidate>
+        <fieldset>
+          <legend><span class="num">1</span> Sistema Ax = b</legend>
+          <div class="campo curto">
+            <label for="gauss-n">Número de equações (n)</label>
+            <input id="gauss-n" type="number" min="1" max="10" value="3">
+            <small class="dica">Sistema n × n, de 1 a 10</small>
+          </div>
+          <div id="gauss-grade"></div>
+          <small class="dica">Preencha cada coeficiente de A e o termo independente b. Aceita frações (1/3) e vírgula decimal (0,5).</small>
+        </fieldset>
+        <div class="acoes">
+          <button type="submit" class="principal">Resolver</button>
+          <button type="button" id="gauss-limpar" class="secundario">Limpar</button>
+        </div>
+      </form>
+      <div class="resultado" id="res-gauss" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <div id="dica" class="dica-flutuante" hidden></div>
+  <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
