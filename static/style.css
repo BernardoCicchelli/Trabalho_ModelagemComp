@@ -134,6 +134,8 @@ ul.solucao { list-style: none; padding: 0; margin: 8px 0 14px; font-family: var(
 
 /* ---------- Tabelas (estilo artigo) ---------- */
 .tabela-rolagem { overflow: auto; max-height: 440px; margin: 6px 0 16px; }
+.tabela-acoes { margin: -8px 0 16px; }
+.tabela-acoes button { font-size: .82rem; padding: 6px 14px; }
 table { border-collapse: collapse; width: 100%; font-family: ui-monospace, Menlo, monospace; font-size: .85rem; background: var(--papel); }
 .legenda-tab { font-family: var(--serifa); font-size: .95rem; margin: 14px 0 6px; color: var(--texto); }
 thead th { border-top: 2px solid var(--texto); border-bottom: 1px solid var(--texto); background: var(--papel); position: sticky; top: 0; font-weight: 600; padding: 6px 12px; text-align: right; white-space: nowrap; }
@@ -186,7 +188,7 @@ details.passo-gauss[open] summary { margin-bottom: 6px; color: var(--acento); }
 /* Impressão: só o resultado (enunciado + tabela + gráficos) */
 @media print {
   body { background: #fff; }
-  .abas, .formulario, .exemplos, .como, .controles, .acoes, #gauss-limpar, .passos-barra button, .vazio { display: none !important; }
+  .abas, .formulario, .exemplos, .como, .controles, .acoes, .tabela-acoes, #gauss-limpar, .passos-barra button, .vazio { display: none !important; }
   .painel[hidden] { display: none !important; }
   main, .topo { max-width: none; padding: 0; }
   .tabela-rolagem { max-height: none; overflow: visible; }
