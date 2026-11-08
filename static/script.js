@@ -191,11 +191,13 @@ function renderizar(div, r) {
   if (r.metodo === "falsa_posicao" && r.tabela && r.tabela.length) {
     h += tabelaHtml("Tabela 1 – Iterações da falsa posição (erro relativo " + esc(r.nome_erro) + ")",
       [["k", "k", "k"], ["a", "n", "a"], ["b", "n", "b"], ["x<sub>k</sub>", "n", "x"], ["f(x<sub>k</sub>)", "n", "fx"], ["erro", "n", "erro"]], r.tabela, classeFinal);
+    h += '<p class="tabela-acoes"><button type="button" class="secundario btn-csv">Baixar tabela (CSV)</button></p>';
   }
   if (r.metodo === "newton" && r.tabela && r.tabela.length) {
     h += `<p class="nota">Derivada simbólica usada: <b>f′(x) = ${esc(r.derivada)}</b></p>`;
     h += tabelaHtml("Tabela 1 – Iterações de Newton-Raphson (erro relativo " + esc(r.nome_erro) + ")",
       [["k", "k", "k"], ["x<sub>k</sub>", "n", "x"], ["f(x<sub>k</sub>)", "n", "fx"], ["f′(x<sub>k</sub>)", "n", "dfx"], ["erro", "n", "erro"]], r.tabela, classeFinal);
+    h += '<p class="tabela-acoes"><button type="button" class="secundario btn-csv">Baixar tabela (CSV)</button></p>';
   }
   if (r.metodo === "gauss") h += renderGauss(r);
 
@@ -204,13 +206,33 @@ function renderizar(div, r) {
   if (r.curva) {
     h += `<div class="barra-graficos"><h3>Gráficos</h3><div class="controles">
         ${temConstrucao ? `<label><input type="checkbox" class="chk-geo"> Mostrar ${r.metodo === "newton" ? "retas tangentes" : "retas secantes"}</label>` : ""}
-        <button type="button" class="secundario btn-replay">Reproduzir iterações</button></div></div>
+        <button type="button" class="secundario btn-replay">Reproduzir iterações</button>
+        <button type="button" class="secundario btn-png-f">Baixar Figura 1 (PNG)</button>
+        ${temErros ? '<button type="button" class="secundario btn-png-e">Baixar Figura 2 (PNG)</button>' : ""}</div></div>
       <div class="graficos">
         <figure><canvas class="cv-f"></canvas><figcaption>Figura 1 – f(x), iterações (pontos azuis numerados) e raiz (ponto vermelho).</figcaption></figure>
         ${temErros ? '<figure><canvas class="cv-e"></canvas><figcaption>Figura 2 – Erro relativo por iteração, em escala logarítmica.</figcaption></figure>' : ""}
       </div>`;
   }
   div.innerHTML = h;
+
+  // Baixar tabela de iterações como CSV (falsa posição / Newton)
+  div.querySelectorAll(".btn-csv").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const ehNewton = r.metodo === "newton";
+      const cabecalhos = ehNewton ? ["k", "x_k", "f(x_k)", "f'(x_k)", "erro"] : ["k", "a", "b", "x_k", "f(x_k)", "erro"];
+      const chaves = ehNewton ? ["k", "x", "fx", "dfx", "erro"] : ["k", "a", "b", "x", "fx", "erro"];
+      baixarTexto(`${r.metodo}-iteracoes.csv`, linhasParaCSV(cabecalhos, chaves, r.tabela), "text/csv;charset=utf-8;");
+    });
+  });
+  // Baixar solução do Gauss como CSV
+  const btnCsvGauss = div.querySelector(".btn-csv-gauss");
+  if (btnCsvGauss) {
+    btnCsvGauss.addEventListener("click", () => {
+      const linhas = r.solucao.map((v, i) => ({ variavel: `x${i + 1}`, valor: v }));
+      baixarTexto("gauss-solucao.csv", linhasParaCSV(["variável", "valor"], ["variavel", "valor"], linhas), "text/csv;charset=utf-8;");
+    });
+  }
 
   graficosAtuais = null;
   opcoesGrafico.geo = false;
@@ -224,6 +246,9 @@ function renderizar(div, r) {
     div.querySelector(".btn-replay").addEventListener("click", () => animar(graficosAtuais, 3500));
     const chk = div.querySelector(".chk-geo");
     if (chk) chk.addEventListener("change", () => { opcoesGrafico.geo = chk.checked; animar(graficosAtuais, 0); });
+    div.querySelector(".btn-png-f").addEventListener("click", () => baixarCanvasPNG(div.querySelector(".cv-f"), `${r.metodo}-grafico.png`));
+    const btnPngE = div.querySelector(".btn-png-e");
+    if (btnPngE) btnPngE.addEventListener("click", () => baixarCanvasPNG(div.querySelector(".cv-e"), `${r.metodo}-erro.png`));
   }
   // Gauss: expandir/recolher todos os passos
   const abrir = div.querySelector("[data-abrir]");
@@ -266,6 +291,7 @@ function renderGauss(r) {
     h += resumo([["Determinante", fmt(r.determinante)], ["Posto de A", r.posto], ["Número de condição cond(A)", fmt(r.condicao)],
       ["Resíduo ‖Ax − b‖", fmt(r.residuo)],
       ["Conferência com numpy.linalg.solve", `diferença máxima ${fmt(r.diferenca_numpy)}`]]);
+    h += '<p class="tabela-acoes"><button type="button" class="secundario btn-csv-gauss">Baixar solução (CSV)</button></p>';
   }
   if (r.passos) {
     h += `<div class="passos-barra"><h3>Passo a passo (matriz aumentada [A | b])</h3><button type="button" class="secundario" data-abrir="1">Expandir todos</button></div>`;
@@ -486,6 +512,40 @@ function animar(graficos, dur) {
     if (t < 1) requestAnimationFrame(quadro);
   }
   requestAnimationFrame(quadro);
+}
+
+// ---------------------------------------------------------------
+// Download: gráfico em PNG e tabelas em CSV (pra colar no relatório)
+// ---------------------------------------------------------------
+
+// Baixa um <canvas> como arquivo PNG
+function baixarCanvasPNG(canvas, nomeArquivo) {
+  const link = document.createElement("a");
+  link.download = nomeArquivo;
+  link.href = canvas.toDataURL("image/png");
+  link.click();
+}
+
+// Monta um texto CSV (vírgula como separador, aspas quando necessário) a partir de linhas de objeto
+function linhasParaCSV(cabecalhos, chaves, linhas) {
+  const campo = (v) => {
+    if (v === null || v === undefined) return "";
+    const s = String(v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const corpo = linhas.map((l) => chaves.map((k) => campo(l[k])).join(",")).join("\n");
+  return cabecalhos.map(campo).join(",") + "\n" + corpo;
+}
+
+// Baixa um texto como arquivo (usado pelo CSV). BOM no início: Excel mostra acentos certos.
+function baixarTexto(nomeArquivo, conteudo, tipo) {
+  const blob = new Blob(["﻿" + conteudo], { type: tipo });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = nomeArquivo;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 // ---------------------------------------------------------------
