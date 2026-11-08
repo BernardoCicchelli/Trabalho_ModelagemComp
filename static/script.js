@@ -209,9 +209,10 @@ function renderizar(div, r) {
         <button type="button" class="secundario btn-replay">Reproduzir iterações</button>
         <button type="button" class="secundario btn-png-f">Baixar Figura 1 (PNG)</button>
         ${temErros ? '<button type="button" class="secundario btn-png-e">Baixar Figura 2 (PNG)</button>' : ""}</div></div>
+      <p class="dica-zoom">Arraste sobre um gráfico pra dar zoom na região; duplo-clique ou "Resetar zoom" volta ao tamanho original.</p>
       <div class="graficos">
-        <figure><canvas class="cv-f"></canvas><figcaption>Figura 1 – f(x), iterações (pontos azuis numerados) e raiz (ponto vermelho).</figcaption></figure>
-        ${temErros ? '<figure><canvas class="cv-e"></canvas><figcaption>Figura 2 – Erro relativo por iteração, em escala logarítmica.</figcaption></figure>' : ""}
+        <figure><canvas class="cv-f"></canvas><button type="button" class="btn-reset-zoom" hidden>↺ Resetar zoom</button><figcaption>Figura 1 – f(x), iterações (pontos azuis numerados) e raiz (ponto vermelho).</figcaption></figure>
+        ${temErros ? '<figure><canvas class="cv-e"></canvas><button type="button" class="btn-reset-zoom" hidden>↺ Resetar zoom</button><figcaption>Figura 2 – Erro relativo por iteração, em escala logarítmica.</figcaption></figure>' : ""}
       </div>`;
   }
   div.innerHTML = h;
@@ -351,26 +352,15 @@ function criarGraficoFuncao(cv, curva, pts, raiz, construcao) {
   ymin = Math.min(ymin, 0); ymax = Math.max(ymax, 0);
   const pad = (ymax - ymin) * 0.08 || 1;
   ymin -= pad; ymax += pad;
-  const xmin = curva[0][0], xmax = curva[curva.length - 1][0];
+  // xmin/xmax/ymin/ymax são "let": o zoom por arraste muda essa janela e redesenha
+  let xmin = curva[0][0], xmax = curva[curva.length - 1][0];
+  const vistaInicial = { xmin, xmax, ymin, ymax }; // pra "resetar zoom"
   const X = (x) => mE + ((x - xmin) / (xmax - xmin)) * (W - mE - mD);
   const Y = (y) => H - mB - ((y - ymin) / (ymax - ymin)) * (H - mT - mB);
+  const Xinv = (px) => xmin + ((px - mE) / (W - mE - mD)) * (xmax - xmin);
+  const Yinv = (py) => ymin + ((H - mB - py) / (H - mT - mB)) * (ymax - ymin);
 
-  // Segmentos da curva: quebra onde f não existe, sai do limite ou cruza uma assíntota
-  const segs = [];
-  let anterior = null;
-  curva.forEach((p) => {
-    const y = p[1];
-    if (y === null || y > ymax || y < ymin) { anterior = null; return; }
-    const assintota = anterior && Math.sign(anterior[1]) !== Math.sign(y) && Math.abs(anterior[1]) > lim / 2 && Math.abs(y) > lim / 2;
-    segs.push({ x: X(p[0]), y: Y(y), mover: !anterior || assintota });
-    anterior = p;
-  });
-
-  // Posição em pixels de cada iteração
-  const marcas = pts.filter((p) => p.x >= xmin && p.x <= xmax).map((p) => {
-    const yv = p.y === null ? 0 : Math.min(ymax, Math.max(ymin, p.y));
-    return { px: X(p.x), py: Y(yv), k: p.k, x: p.x, y: p.y };
-  });
+  let marcas = []; // posição em pixels de cada iteração (recalculada a cada desenho, pro hover)
 
   function desenhar(t) {
     g.clearRect(0, 0, W, H);
@@ -389,6 +379,17 @@ function criarGraficoFuncao(cv, curva, pts, raiz, construcao) {
     g.fillStyle = cor("--grafico-texto"); g.font = "italic 12px Georgia, serif";
     g.fillText("x", W - mD - 8, Y(0) - 6); g.fillText("f(x)", mE + 6, mT - 6);
     g.font = "12px system-ui, sans-serif";
+
+    // Segmentos da curva dentro da janela atual: quebra onde f não existe, sai da janela ou cruza uma assíntota
+    const segs = [];
+    let anterior = null;
+    curva.forEach((p) => {
+      const y = p[1];
+      if (y === null || p[0] < xmin || p[0] > xmax || y > ymax || y < ymin) { anterior = null; return; }
+      const assintota = anterior && Math.sign(anterior[1]) !== Math.sign(y) && Math.abs(anterior[1]) > lim / 2 && Math.abs(y) > lim / 2;
+      segs.push({ x: X(p[0]), y: Y(y), mover: !anterior || assintota });
+      anterior = p;
+    });
 
     // curva (traçada até a fração t/0.6)
     const n = Math.floor(segs.length * Math.min(1, t / 0.6));
@@ -412,7 +413,11 @@ function criarGraficoFuncao(cv, curva, pts, raiz, construcao) {
       g.restore();
     }
 
-    // iterações aparecem uma a uma depois da curva
+    // Posição em pixels de cada iteração dentro da janela atual; aparecem uma a uma depois da curva
+    marcas = pts.filter((p) => p.x >= xmin && p.x <= xmax).map((p) => {
+      const yv = p.y === null ? 0 : Math.min(ymax, Math.max(ymin, p.y));
+      return { px: X(p.x), py: Y(yv), k: p.k, x: p.x, y: p.y };
+    });
     const mostrar = Math.ceil(progresso * marcas.length);
     for (let i = 0; i < mostrar; i++) {
       const m = marcas[i];
@@ -434,6 +439,11 @@ function criarGraficoFuncao(cv, curva, pts, raiz, construcao) {
     });
     return melhor;
   });
+  ligarZoom(cv, { mE, mD, mT, mB, W, H }, g, desenhar, {
+    inverterX: Xinv, inverterY: Yinv,
+    aplicarZoom: (a, b, c, d) => { xmin = a; xmax = b; ymin = c; ymax = d; },
+    resetarZoom: () => { ({ xmin, xmax, ymin, ymax } = vistaInicial); },
+  });
   return { desenhar };
 }
 
@@ -447,10 +457,14 @@ function criarGraficoErro(cv, erros) {
   const ls = erros.map((e) => Math.log10(Math.max(e[1], 1e-17)));
   let lmin = Math.floor(Math.min(...ls)), lmax = Math.ceil(Math.max(...ls));
   if (lmax === lmin) lmax += 1;
-  const kmin = erros[0][0], kmax = erros[erros.length - 1][0];
+  let kmin = erros[0][0], kmax = erros[erros.length - 1][0];
+  const vistaInicial = { xmin: kmin, xmax: kmax, ymin: lmin, ymax: lmax }; // pra "resetar zoom"
   const X = (k) => mE + ((k - kmin) / Math.max(kmax - kmin, 1)) * (W - mE - mD);
   const Y = (l) => H - mB - ((l - lmin) / (lmax - lmin)) * (H - mT - mB);
-  const pos = erros.map((e, i) => ({ px: X(e[0]), py: Y(ls[i]), k: e[0], erro: e[1] }));
+  const Xinv = (px) => kmin + ((px - mE) / (W - mE - mD)) * Math.max(kmax - kmin, 1);
+  const Yinv = (py) => lmin + ((H - mB - py) / (H - mT - mB)) * (lmax - lmin);
+
+  let pos = [];
 
   function desenhar(t) {
     g.clearRect(0, 0, W, H);
@@ -458,14 +472,19 @@ function criarGraficoErro(cv, erros) {
     const passo = Math.max(1, Math.ceil((lmax - lmin) / 6));
     for (let l = lmin; l <= lmax; l += passo) {
       g.beginPath(); g.moveTo(mE, Y(l)); g.lineTo(W - mD, Y(l)); g.stroke();
-      g.fillText("1e" + l, 6, Y(l) + 4);
+      const l2 = Math.round(l * 10) / 10; // zoom pode deixar a escala fracionária
+      g.fillText("1e" + (Number.isInteger(l2) ? l2 : l2.toFixed(1)), 6, Y(l) + 4);
     }
-    g.fillText("k = " + kmin, mE, H - 14);
-    g.fillText("k = " + kmax, W - mD - 42, H - 14);
+    g.fillText("k = " + fmt(Number(kmin.toPrecision(4))), mE, H - 14);
+    g.fillText("k = " + fmt(Number(kmax.toPrecision(4))), W - mD - 54, H - 14);
     g.font = "italic 12px Georgia, serif";
     g.fillText("erro", mE + 6, mT - 6); g.fillText("iteração k", W / 2 - 24, H - 3);
     g.font = "12px system-ui, sans-serif";
 
+    // Pontos dentro da janela atual (recalculado a cada desenho, pro zoom e pro hover)
+    pos = erros
+      .filter((e) => e[0] >= kmin && e[0] <= kmax && Math.log10(Math.max(e[1], 1e-17)) >= lmin && Math.log10(Math.max(e[1], 1e-17)) <= lmax)
+      .map((e) => ({ px: X(e[0]), py: Y(Math.log10(Math.max(e[1], 1e-17))), k: e[0], erro: e[1] }));
     const n = Math.max(1, Math.ceil(pos.length * t));
     g.strokeStyle = cor("--grafico-linha"); g.lineWidth = 2; g.lineJoin = "round";
     g.beginPath();
@@ -482,6 +501,11 @@ function criarGraficoErro(cv, erros) {
     });
     return melhor;
   });
+  ligarZoom(cv, { mE, mD, mT, mB, W, H }, g, desenhar, {
+    inverterX: Xinv, inverterY: Yinv,
+    aplicarZoom: (a, b, c, d) => { kmin = a; kmax = b; lmin = c; lmax = d; },
+    resetarZoom: () => { ({ xmin: kmin, xmax: kmax, ymin: lmin, ymax: lmax } = vistaInicial); },
+  });
   return { desenhar };
 }
 
@@ -489,6 +513,7 @@ function criarGraficoErro(cv, erros) {
 function ligarDica(cv, procurar) {
   const dica = $("#dica");
   cv.addEventListener("mousemove", (e) => {
+    if (cv.classList.contains("arrastando-zoom")) { dica.hidden = true; return; }
     const r = cv.getBoundingClientRect();
     const texto = procurar(e.clientX - r.left, e.clientY - r.top);
     if (!texto) { dica.hidden = true; return; }
@@ -498,6 +523,57 @@ function ligarDica(cv, procurar) {
     dica.style.top = e.clientY + 14 + "px";
   });
   cv.addEventListener("mouseleave", () => (dica.hidden = true));
+}
+
+// Zoom por arraste: seleciona um retângulo sobre o gráfico e dá zoom nessa região.
+// Duplo-clique (ou o botão "Resetar zoom" na figura) volta à janela original.
+function ligarZoom(cv, caixa, g, desenhar, { inverterX, inverterY, aplicarZoom, resetarZoom }) {
+  const { mE, mD, mT, mB, W, H } = caixa;
+  const botaoReset = cv.closest("figure")?.querySelector(".btn-reset-zoom");
+  let ix = 0, iy = 0;
+  const limitar = (px, py) => [Math.min(Math.max(px, mE), W - mD), Math.min(Math.max(py, mT), H - mB)];
+  const posRelativa = (e) => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+
+  function mostrarSelecao(x0, y0, x1, y1) {
+    desenhar(1);
+    g.save();
+    g.globalAlpha = 0.15; g.fillStyle = cor("--grafico-linha");
+    g.fillRect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0));
+    g.globalAlpha = 1; g.strokeStyle = cor("--grafico-linha"); g.lineWidth = 1; g.setLineDash([4, 3]);
+    g.strokeRect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0));
+    g.restore();
+  }
+  function aoMover(e) {
+    const [px, py] = limitar(...posRelativa(e));
+    mostrarSelecao(ix, iy, px, py);
+  }
+  function aoSoltar(e) {
+    window.removeEventListener("mousemove", aoMover);
+    window.removeEventListener("mouseup", aoSoltar);
+    cv.classList.remove("arrastando-zoom");
+    const [px, py] = limitar(...posRelativa(e));
+    if (Math.abs(px - ix) < 12 || Math.abs(py - iy) < 12) { desenhar(1); return; } // arraste pequeno demais: ignora
+    const xa = inverterX(ix), xb = inverterX(px), ya = inverterY(iy), yb = inverterY(py);
+    aplicarZoom(Math.min(xa, xb), Math.max(xa, xb), Math.min(ya, yb), Math.max(ya, yb));
+    desenhar(1);
+    if (botaoReset) botaoReset.hidden = false;
+  }
+  cv.addEventListener("mousedown", (e) => {
+    const [px, py] = posRelativa(e);
+    if (px < mE || px > W - mD || py < mT || py > H - mB) return;
+    ix = px; iy = py;
+    cv.classList.add("arrastando-zoom");
+    window.addEventListener("mousemove", aoMover);
+    window.addEventListener("mouseup", aoSoltar);
+    e.preventDefault();
+  });
+  function resetar() {
+    resetarZoom();
+    desenhar(1);
+    if (botaoReset) botaoReset.hidden = true;
+  }
+  cv.addEventListener("dblclick", resetar);
+  if (botaoReset) botaoReset.addEventListener("click", resetar);
 }
 
 // Anima de 0 a 1 em 'dur' ms (0 = desenha o final direto)
