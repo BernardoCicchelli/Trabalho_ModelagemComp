@@ -348,10 +348,12 @@ def verificar_continuidade(avaliar, a, b):
         if avaliar(float(xi)) is None:
             raise ErroCalculo(
                 "Função não definida / descontínua no intervalo",
-                f"f(x) não é um número real finito em x ≈ {xi:.6g}, dentro de [{a:g}, {b:g}]. "
-                "O Teorema de Bolzano (do valor intermediário) exige f CONTÍNUA em [a, b]; "
-                "sem continuidade, a mudança de sinal não garante raiz e o método pode "
-                "convergir para uma assíntota.",
+                f"Passo 1: o programa testou vários pontos dentro de [{a:g}, {b:g}] e achou um onde f "
+                f"não existe: em x ≈ {xi:.6g}, f(x) não é um número real finito. "
+                "Passo 2: o Teorema de Bolzano (do valor intermediário) exige f CONTÍNUA em TODO o "
+                "intervalo [a, b], sem exceção nenhuma. "
+                "Passo 3: como há um ponto sem continuidade, a mudança de sinal entre f(a) e f(b) deixa "
+                "de garantir raiz — o 'cruzamento' pode ser só uma assíntota, não um zero de f.",
                 "Escolha um intervalo que não contenha pontos onde f não existe (divisão por zero, log de não positivo...).")
     # (2) bisseção interna: numa raiz verdadeira |f| fica ~0; numa assíntota fica enorme
     lo, hi, flo = a, b, avaliar(a)
@@ -375,9 +377,13 @@ def verificar_continuidade(avaliar, a, b):
     if fc is None or abs(fc) > 1e-3:
         raise ErroCalculo(
             "A mudança de sinal não é uma raiz (função descontínua)",
-            f"f(a) e f(b) têm sinais opostos, mas ao fechar o intervalo em x ≈ {c:.6g} o valor |f| continua "
-            f"grande ({'indefinido' if fc is None else format(abs(fc), '.3g')}). Isso é uma assíntota/salto, não um zero. "
-            "O Teorema de Bolzano só vale para funções CONTÍNUAS; aqui a hipótese falha.",
+            "Passo 1: f(a) e f(b) têm sinais opostos, então o programa foi bissectando o intervalo pra "
+            "conferir se existe mesmo uma raiz ali. "
+            f"Passo 2: ao fechar o intervalo bem de perto, em x ≈ {c:.6g}, o valor de |f| continua "
+            f"grande ({'indefinido' if fc is None else format(abs(fc), '.3g')}) em vez de ir a zero. "
+            "Passo 3: numa raiz de verdade |f| teria que se aproximar de zero conforme o intervalo "
+            "encolhe; como isso não acontece, o que parecia mudança de sinal é, na verdade, uma "
+            "assíntota ou um salto — e o Teorema de Bolzano exige f CONTÍNUA, hipótese que falha aqui.",
             "Escolha um intervalo onde f seja contínua (por exemplo, sem conter o ponto da assíntota).")
 
 
@@ -407,7 +413,10 @@ def _falsa_posicao(texto_f, texto_a, texto_b, texto_tol, texto_max, ctx):
     if a0 >= b0:
         raise ErroCalculo(
             "Intervalo inválido (a ≥ b)",
-            "O intervalo [a, b] precisa ter a < b para que exista um intervalo de verdade.",
+            f"Passo 1: a falsa posição parte de um INTERVALO [a, b], não de um ponto só. "
+            f"Passo 2: aqui a = {a0:g} e b = {b0:g}, ou seja a não é menor que b. "
+            "Passo 3: sem a < b não existe um intervalo de verdade para aplicar o Teorema de Bolzano "
+            "nem para traçar a reta secante entre (a, f(a)) e (b, f(b)).",
             "Troque os valores de a e b para que a seja menor que b.")
 
     fa, fb = avaliar(a0), avaliar(b0)
@@ -415,8 +424,11 @@ def _falsa_posicao(texto_f, texto_a, texto_b, texto_tol, texto_max, ctx):
         if fv is None:
             raise ErroCalculo(
                 f"f({nome}) fora do domínio",
-                f"f({v:g}) não é um número real finito (a função não está definida nesse ponto: log de "
-                "número ≤ 0, raiz de negativo, divisão por zero...). O método precisa calcular f nos extremos.",
+                f"Passo 1: para começar, o programa precisa calcular f({nome}) = f({v:g}). "
+                "Passo 2: esse valor não é um número real finito — pode ser log de número ≤ 0, raiz "
+                "quadrada de negativo ou divisão por zero, por exemplo. "
+                "Passo 3: como o método usa f(a) e f(b) só para checar o sinal e montar a reta secante, "
+                "se um dos dois nem existe não há como nem começar a iterar.",
                 "Escolha um intervalo inteiramente dentro do domínio de f.")
 
     avisos = []
@@ -439,9 +451,13 @@ def _falsa_posicao(texto_f, texto_a, texto_b, texto_tol, texto_max, ctx):
     if fa * fb > 0:
         raise ErroCalculo(
             "f(a)·f(b) > 0: Bolzano não garante raiz",
-            f"f(a) = {fa:.4g} e f(b) = {fb:.4g} têm o MESMO sinal. O Teorema de Bolzano só garante uma raiz "
-            "quando f é contínua e f(a)·f(b) < 0. Isso não prova que NÃO há raiz: pode haver um número par "
-            "de raízes no intervalo (a curva cruza o eixo duas vezes e volta ao mesmo sinal) ou a curva pode apenas tocar o eixo.",
+            f"Passo 1: o programa calculou f(a) = {fa:.4g} e f(b) = {fb:.4g}. "
+            "Passo 2: os dois têm o MESMO sinal, ou seja f(a)·f(b) > 0. "
+            "Passo 3: o Teorema de Bolzano só garante uma raiz entre a e b quando f é contínua E "
+            "f(a)·f(b) < 0 (sinais opostos) — e essa segunda condição falhou aqui. "
+            "Passo 4: isso não prova que não exista raiz no intervalo: pode haver um número par de "
+            "raízes (a curva cruza o eixo duas vezes e volta ao mesmo sinal) ou a curva apenas tocar o "
+            "eixo sem cruzar.",
             "Escolha a e b onde f tenha sinais opostos (olhe o gráfico abaixo).")
     verificar_continuidade(avaliar, a0, b0)
 
@@ -475,16 +491,24 @@ def _falsa_posicao(texto_f, texto_a, texto_b, texto_tol, texto_max, ctx):
     if not convergiu:
         raise ErroCalculo(
             "Não convergiu no máximo de iterações",
-            f"Após {max_iter} iterações o erro ainda é maior que a tolerância {tol:g}. "
-            "A falsa posição tem convergência apenas linear e pode ser lenta quando um extremo fica 'preso'.",
+            f"Passo 1: o programa rodou as {max_iter} iterações permitidas e o erro relativo ainda é "
+            f"maior que a tolerância {tol:g}. "
+            "Passo 2: a falsa posição tem convergência apenas LINEAR (ordem ≈ 1) — mais lenta do que, "
+            "por exemplo, Newton. "
+            "Passo 3: além disso, é comum um dos extremos do intervalo nunca ser substituído (ficar "
+            "'preso'), o que deixa os passos ainda mais lentos nesse caso.",
             "Aumente o máximo de iterações ou a tolerância.", extra=dados)
 
     if abs(fx) > max(10 * tol, 1e-6):
         avisos.append({
             "titulo": "Critério de parada atingido, mas |f(x)| ainda é grande",
-            "explicacao": f"Parou com erro ≤ tolerância, porém |f(x)| = {abs(fx):.3g}. Na falsa posição um dos "
-                          "extremos costuma ficar 'preso' e os passos ficam pequenos mesmo longe da raiz. "
-                          "O valor pode não estar tão perto da raiz quanto o erro sugere."})
+            "explicacao": "Passo 1: o método parou porque o erro relativo entre iterações ficou ≤ "
+                          "tolerância. "
+                          f"Passo 2: mas |f(x)| = {abs(fx):.3g} ainda está longe de zero, o que seria "
+                          "estranho se x já estivesse perto da raiz. "
+                          "Passo 3: isso acontece porque, na falsa posição, um dos extremos pode ficar "
+                          "'preso', fazendo os passos encolherem mesmo com x ainda longe da raiz — por "
+                          "isso aqui o erro pequeno não garante uma boa aproximação."})
     dados.update({
         "ok": True, "convergiu": True, "raiz": x, "fraiz": fx, "iteracoes": len(tabela), "ordem": p,
         "avisos": avisos,
@@ -524,7 +548,9 @@ def newton(texto_f, texto_x0, texto_tol, texto_max):
         com_curva()
         raise ErroCalculo(
             "x0 fora do domínio",
-            f"f({x:g}) não é um número real finito: x0 não pertence ao domínio de f.",
+            "Passo 1: antes de iterar, o programa calcula f(x0) para dar o primeiro passo. "
+            f"Passo 2: f({x:g}) não é um número real finito — ou seja, x0 não pertence ao domínio de f. "
+            "Passo 3: sem f(x0) não há como montar a reta tangente nem calcular x1.",
             "Escolha um x0 onde f esteja definida.", extra=dados)
 
     x_anterior = None
@@ -536,9 +562,11 @@ def newton(texto_f, texto_x0, texto_tol, texto_max):
             com_curva()
             raise ErroCalculo(
                 "x_k saiu do domínio de f",
-                f"Na iteração {k}, x_k = {x:.6g} caiu fora do domínio de f (f(x_k) não é real). "
-                "O passo de Newton vem da reta tangente, que ignora o domínio: ele pode lançar x_k para "
-                "onde f não existe.",
+                f"Passo 1: na iteração {k}, o método calculou x_k = {x:.6g}. "
+                "Passo 2: f(x_k) não é um número real — x_k caiu fora do domínio de f. "
+                "Passo 3: isso acontece porque o passo de Newton vem da reta TANGENTE, que não 'sabe' "
+                "onde f existe ou não; dependendo da inclinação, o passo pode empurrar x_k para fora do "
+                "domínio (por exemplo, log(x) com um x0 ruim pode gerar um x_k negativo).",
                 "Escolha um x0 mais próximo da raiz (olhe o gráfico).", extra=dados)
         dfx = df(x)
         erro = calcular_erro(x, x_anterior)
@@ -551,18 +579,23 @@ def newton(texto_f, texto_x0, texto_tol, texto_max):
             com_curva()
             raise ErroCalculo(
                 "Divergência",
-                f"|x_k| cresceu sem limite (x_{k} ≈ {x:.3g}). Newton só tem convergência garantida "
-                "se x0 estiver 'perto o bastante' da raiz (convergência local); fora disso as tangentes "
-                "podem afastar as iterações (ex.: atan(x) com |x0| grande).",
+                f"Passo 1: a sequência de x_k não parou de crescer em módulo (x_{k} ≈ {x:.3g}). "
+                "Passo 2: Newton só tem convergência GARANTIDA quando x0 já está perto o bastante da "
+                "raiz (convergência local) — não há garantia nenhuma partindo de qualquer ponto. "
+                "Passo 3: fora dessa vizinhança, a reta tangente pode apontar cada vez mais para longe "
+                "da raiz em vez de se aproximar (ex.: atan(x) com |x0| grande, onde a tangente fica "
+                "quase horizontal).",
                 "Escolha um x0 mais próximo da raiz.", extra=dados)
         # tangente (quase) horizontal: f'(x_k) minúsculo comparado a f(x_k)
         if dfx is None or abs(dfx) < 1e-14 * max(abs(fx), 1e-300):
             com_curva()
             raise ErroCalculo(
                 "Derivada nula: f'(x_k) = 0",
-                f"Em x_k = {x:.6g} a derivada vale {'indefinida' if dfx is None else format(dfx, '.3g')}. "
-                "A fórmula x_(k+1) = x_k − f(x_k)/f'(x_k) divide por f'(x_k); com tangente horizontal "
-                "a reta tangente não corta o eixo x (ou corta muito longe) e o método não pode continuar.",
+                f"Passo 1: em x_k = {x:.6g}, a derivada vale "
+                f"{'indefinida' if dfx is None else format(dfx, '.3g')} — praticamente zero. "
+                "Passo 2: a fórmula de Newton é x_(k+1) = x_k − f(x_k)/f'(x_k); ela divide por f'(x_k). "
+                "Passo 3: com a tangente horizontal (f'(x_k) = 0) ela não corta o eixo x (ou corta "
+                "infinitamente longe), então não existe um x_(k+1) para continuar.",
                 "Escolha outro x0 onde f' ≠ 0.", extra=dados)
 
         x_novo = x - fx / dfx
@@ -571,7 +604,10 @@ def newton(texto_f, texto_x0, texto_tol, texto_max):
             com_curva()
             raise ErroCalculo(
                 "Divergência",
-                "O próximo x_k deixou de ser um número finito (overflow).",
+                "Passo 1: ao calcular o próximo x_k, o resultado deixou de ser um número finito "
+                "(overflow). "
+                "Passo 2: é um caso extremo de divergência — a tangente empurrou x_k para um valor tão "
+                "grande que o computador não consegue mais representá-lo.",
                 "Escolha um x0 mais próximo da raiz.", extra=dados)
         # ciclo: o novo valor já apareceu antes e ainda não convergimos
         for antigo in xs[:-1] if len(xs) > 1 else []:
@@ -580,9 +616,13 @@ def newton(texto_f, texto_x0, texto_tol, texto_max):
                 com_curva()
                 raise ErroCalculo(
                     "Ciclo detectado",
-                    f"x_(k+1) = {x_novo:.6g} repete um valor anterior sem convergir: as iterações ficam "
-                    "alternando entre os mesmos pontos (ex.: 0, 1, 0, 1, ...). Newton não garante "
-                    "convergência quando x0 está longe da raiz.",
+                    f"Passo 1: o novo valor x_(k+1) = {x_novo:.6g} já havia aparecido antes nesta mesma "
+                    "sequência. "
+                    "Passo 2: isso significa que as iterações entraram num CICLO, alternando para "
+                    "sempre entre os mesmos pontos (exemplo clássico: f(x) = x³ − 2x + 2 com x0 = 0 "
+                    "alterna 0, 1, 0, 1, ...). "
+                    "Passo 3: Newton não garante convergência quando x0 está longe da raiz — um ciclo "
+                    "é uma forma de nunca convergir, mesmo sem nenhuma derivada nula no caminho.",
                     "Escolha outro x0 (olhe o gráfico).", extra=dados)
         x_anterior = x
         x = x_novo
@@ -592,8 +632,11 @@ def newton(texto_f, texto_x0, texto_tol, texto_max):
     if not convergiu:
         raise ErroCalculo(
             "Não convergiu no máximo de iterações",
-            f"Após {max_iter} iterações o erro ainda é maior que {tol:g}. Possíveis causas: f não tem raiz "
-            "real (ex.: exp(x) > 0 sempre; x_k anda sem parar enquanto f'(x_k) → 0), x0 ruim, ou raiz múltipla (convergência lenta).",
+            f"Passo 1: o programa rodou as {max_iter} iterações permitidas e o erro ainda é maior que "
+            f"{tol:g}. "
+            "Passo 2: isso costuma ter uma destas causas: (a) f não tem raiz real, como exp(x) > 0 "
+            "para todo x; (b) x0 estava mal escolhido e a sequência anda sem convergir; ou (c) a raiz "
+            "é múltipla (f(r) = f'(r) = 0), e nesse caso a convergência vira linear e bem mais lenta.",
             "Verifique no gráfico se f cruza o eixo x; tente outro x0 ou mais iterações.", extra=dados)
 
     p = ordem_convergencia(xs)
@@ -601,8 +644,13 @@ def newton(texto_f, texto_x0, texto_tol, texto_max):
     if p is not None and 0.7 <= p <= 1.3 and len(tabela) >= 4:
         avisos.append({
             "titulo": "Convergência linear: provável raiz múltipla",
-            "explicacao": f"A ordem observada é p ≈ {p:.2f} (≈ 1), mas Newton numa raiz simples tem ordem 2. "
-                          "Quando f(r) = f'(r) = 0 (raiz múltipla), Newton perde a convergência quadrática e vira linear."})
+            "explicacao": f"Passo 1: a ordem de convergência observada é p ≈ {p:.2f}, ou seja, "
+                          "próxima de 1 (linear). "
+                          "Passo 2: numa raiz SIMPLES, Newton deveria convergir com ordem 2 "
+                          "(quadrática) — bem mais rápido. "
+                          "Passo 3: quando a raiz é múltipla (f(r) = f'(r) = 0), a prova da "
+                          "convergência quadrática deixa de valer e o método cai para convergência "
+                          "linear, que é exatamente o que está sendo observado aqui."})
     fx = tabela[-1]["fx"]
     dados.update({
         "ok": True, "convergiu": True, "raiz": xs[-1], "fraiz": fx, "iteracoes": len(tabela) - 1,
@@ -692,15 +740,23 @@ def gauss(A_texto, b_texto):
         if impossivel:
             raise ErroCalculo(
                 "Sistema IMPOSSÍVEL (sem solução)",
-                f"Após o pivoteamento surgiu uma linha do tipo 0 = c com c ≠ 0. Pelo Teorema de "
-                f"Rouché-Capelli, posto(A) = {posto} < posto([A|b]) = {posto + 1}: as equações são "
-                "contraditórias e não existe nenhum x que satisfaça Ax = b.",
+                "Passo 1: depois do pivoteamento, sobrou uma linha do tipo 0 = c, com c ≠ 0 — uma "
+                "afirmação impossível de ser verdadeira. "
+                f"Passo 2: isso faz posto(A) = {posto} ficar menor que posto([A|b]) = {posto + 1}. "
+                "Passo 3: pelo Teorema de Rouché-Capelli, quando posto(A) < posto([A|b]) o sistema é "
+                "IMPOSSÍVEL: as equações se contradizem e não existe nenhum vetor x que satisfaça "
+                "Ax = b ao mesmo tempo.",
                 "Revise os coeficientes e o vetor b.", extra=base)
         raise ErroCalculo(
             "Sistema INDETERMINADO (infinitas soluções)",
-            f"A matriz é singular (pivô ≈ 0 mesmo após o pivoteamento), mas as linhas nulas ficaram com 0 = 0. "
-            f"Pelo Teorema de Rouché-Capelli, posto(A) = posto([A|b]) = {posto} < n = {n}: o sistema é "
-            f"possível, porém com {n - posto} grau(s) de liberdade, logo há infinitas soluções.",
+            "Passo 1: a matriz é singular — mesmo com o pivoteamento parcial, não sobrou pivô para "
+            "uma ou mais colunas. "
+            "Passo 2: mas, ao chegar nessa coluna, a linha correspondente ficou 0 = 0 (verdadeira, em "
+            "vez de contraditória). "
+            f"Passo 3: isso dá posto(A) = posto([A|b]) = {posto}, só que menor que n = {n} incógnitas. "
+            "Passo 4: pelo Teorema de Rouché-Capelli, posto igual mas menor que n significa sistema "
+            f"possível e INDETERMINADO: sobram {n - posto} grau(s) de liberdade, logo existem "
+            "infinitas soluções.",
             "Remova equações redundantes ou acrescente equações independentes.", extra=base)
 
     # substituição retroativa
@@ -723,9 +779,13 @@ def gauss(A_texto, b_texto):
     if cond > 1e10:
         avisos.append({
             "titulo": "Matriz mal condicionada",
-            "explicacao": f"cond(A) ≈ {cond:.3g} > 1e10. Pequenos erros de arredondamento em A ou b podem "
-                          "ser amplificados por esse fator, então a solução pode ter poucos dígitos corretos "
-                          "mesmo com resíduo pequeno."})
+            "explicacao": f"Passo 1: o número de condição calculado é cond(A) ≈ {cond:.3g}, bem acima "
+                          "de 1e10. "
+                          "Passo 2: esse número mede quanto um erro relativo pequeno em A ou em b pode "
+                          "ser amplificado na solução x. "
+                          "Passo 3: com cond(A) tão grande, até o arredondamento normal de ponto "
+                          "flutuante pode virar um erro grande na resposta — por isso a solução pode "
+                          "ter poucos dígitos corretos mesmo que o resíduo ‖Ax − b‖ pareça pequeno."})
     return {
         "ok": True, "metodo": "gauss", "n": n, "solucao": sol, "determinante": det, "posto": posto,
         "residuo": residuo, "solucao_numpy": [float(v) for v in x_numpy], "diferenca_numpy": diferenca,
