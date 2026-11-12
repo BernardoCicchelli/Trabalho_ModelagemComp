@@ -12,13 +12,23 @@ function esc(t) {
   return String(t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-// Formata número (null vira traço)
+// Formata número (null vira traço; fração exata {num,den} vira "n/d"; vírgula decimal na tela)
 function fmt(v) {
   if (v === null || v === undefined) return "—";
+  if (typeof v === "object" && "num" in v && "den" in v) {
+    return v.den === 1 ? String(v.num) : `${v.num}/${v.den}`;
+  }
   if (v === 0) return "0";
   const a = Math.abs(v);
-  if (a < 1e-4 || a >= 1e7) return v.toExponential(4);
-  return String(Number(v.toPrecision(10)));
+  const texto = a < 1e-4 || a >= 1e7 ? v.toExponential(4) : String(Number(v.toPrecision(10)));
+  return texto.replace(".", ",");
+}
+
+// Valor numérico por trás de fmt() (fração -> aproximação float), para contas internas do gráfico/tabela
+function numDe(v) {
+  if (v === null || v === undefined) return null;
+  if (typeof v === "object" && "valor" in v) return v.valor;
+  return v;
 }
 
 async function chamarApi(url, dados) {
@@ -107,6 +117,15 @@ const EX_GAUSS = [
   ["[[1, 2], [2, 4]], b = (1, 2)", "ruim", { A: [[1, 2], [2, 4]], b: [1, 2] }, "indeterminado: aparece 0 = 0"],
   ["[[1, 2], [2, 4]], b = (1, 3)", "ruim", { A: [[1, 2], [2, 4]], b: [1, 3] }, "impossível: aparece 0 = c, c ≠ 0"],
   ["[[1,2,3],[4,5,6],[7,8,9]]", "ruim", { A: [[1, 2, 3], [4, 5, 6], [7, 8, 9]], b: [1, 2, 3] }, "matriz singular (det = 0)"],
+  ["Exemplo 1 do slide (frações exatas, sem pivoteamento)", "bom",
+    { A: [[3, 2, 4], [1, 1, 2], [4, 3, -2]], b: [1, 2, 3], pivotear: false, modo_numero: "fracao" },
+    "x = (−3, 5, 0), m21=1/3, m31=4/3, m32=1"],
+  ["Exemplo 3 do slide, SEM pivoteamento (3 alg. sig.)", "bom",
+    { A: [[0.0002, 2], [2, 2]], b: [5, 6], pivotear: false, casas_sig: 3 },
+    "x1 = 0: pivô pequeno amplifica o erro (prova real falha)"],
+  ["Exemplo 3 do slide, COM pivoteamento (3 alg. sig.)", "bom",
+    { A: [[0.0002, 2], [2, 2]], b: [5, 6], pivotear: true, casas_sig: 3 },
+    "x1 = 0,5: o pivoteamento corrige o problema do exemplo anterior"],
 ];
 
 // Monta dois quadros: "Casos que funcionam" e "Casos em que o método falha"
@@ -171,6 +190,44 @@ function tabelaHtml(legenda, colunas, linhas, classeFinal) {
   return h + "</tbody></table></div>";
 }
 
+// ---------------------------------------------------------------
+// Navegador de passos: "Passo anterior" / "Próximo passo" / "Mostrar tudo"
+// Chama aoMudar(indice0based, mostrarTudo) sempre que o estado muda.
+// A tabela completa continua sempre visível; o navegador controla o
+// painel de fórmula substituída, o destaque da linha atual e a
+// construção geométrica (secante/tangente) no gráfico.
+// ---------------------------------------------------------------
+function barraNavegacao(total) {
+  if (total <= 0) return "";
+  return `<div class="nav-passos">
+    <button type="button" class="secundario nav-ant">◂ Passo anterior</button>
+    <span class="nav-info">Passo <b class="nav-atual">1</b> de ${total}</span>
+    <button type="button" class="secundario nav-prox">Próximo passo ▸</button>
+    <button type="button" class="secundario nav-tudo">Mostrar tudo</button>
+  </div>`;
+}
+
+function ligarNavegacao(container, total, aoMudar) {
+  if (total <= 0) return;
+  let atual = 0, tudo = false;
+  const elAtual = container.querySelector(".nav-atual");
+  const btnAnt = container.querySelector(".nav-ant");
+  const btnProx = container.querySelector(".nav-prox");
+  const btnTudo = container.querySelector(".nav-tudo");
+  function atualizar() {
+    elAtual.textContent = tudo ? total : atual + 1;
+    btnAnt.disabled = tudo || atual <= 0;
+    btnProx.disabled = tudo || atual >= total - 1;
+    btnTudo.classList.toggle("ativo", tudo);
+    btnTudo.textContent = tudo ? "Voltar ao passo a passo" : "Mostrar tudo";
+    aoMudar(atual, tudo);
+  }
+  btnAnt.addEventListener("click", () => { atual = Math.max(0, atual - 1); tudo = false; atualizar(); });
+  btnProx.addEventListener("click", () => { atual = Math.min(total - 1, atual + 1); tudo = false; atualizar(); });
+  btnTudo.addEventListener("click", () => { tudo = !tudo; atualizar(); });
+  atualizar();
+}
+
 const opcoesGrafico = { geo: false }; // "mostrar construção geométrica"
 
 function renderizar(div, r) {
@@ -178,9 +235,6 @@ function renderizar(div, r) {
   if (r.ok) {
     if (r.metodo !== "gauss") {
       h += `<div class="resposta"><span class="rotulo-res">Raiz aproximada</span><span class="valor-res">x ≈ ${fmt(r.raiz)}</span></div>`;
-      h += `<p class="conclusao">${r.iteracoes === 0 ? esc(r.mensagem) : `O método convergiu em ${r.iteracoes} iterações: o erro relativo ficou menor ou igual à tolerância.`}</p>`;
-      h += resumo([["f(x) na raiz", fmt(r.fraiz)], ["Iterações", r.iteracoes],
-        ["Ordem de convergência observada", r.ordem === null || r.ordem === undefined ? "—" : "p ≈ " + r.ordem.toFixed(2)]]);
     }
     (r.avisos || []).forEach((a) => (h += blocoAtencao(a)));
   } else {
@@ -188,41 +242,85 @@ function renderizar(div, r) {
   }
 
   const classeFinal = r.ok ? "final-ok" : "final-erro";
+  const temPassos = (r.metodo === "falsa_posicao" || r.metodo === "newton") && r.tabela && r.tabela.length > 0;
+  if (temPassos) {
+    h += `<h3 class="passo"><span class="num">P</span> Passo a passo</h3>`;
+    h += barraNavegacao(r.tabela.length);
+    h += '<div class="painel-passo"><div class="conteudo-passo"></div></div>';
+  }
+
   if (r.metodo === "falsa_posicao" && r.tabela && r.tabela.length) {
-    h += tabelaHtml("Tabela 1 – Iterações da falsa posição (erro relativo " + esc(r.nome_erro) + ")",
-      [["k", "k", "k"], ["a", "n", "a"], ["b", "n", "b"], ["x<sub>k</sub>", "n", "x"], ["f(x<sub>k</sub>)", "n", "fx"], ["erro", "n", "erro"]], r.tabela, classeFinal);
+    h += tabelaHtml("Tabela 1 – Iterações da falsa posição (erro relativo " + esc(r.nome_erro) + "; também em %)",
+      [["iteração", "k", "k"], ["x<sub>l</sub>", "n", "a"], ["x<sub>u</sub>", "n", "b"], ["x<sub>r</sub>", "n", "x"],
+       ["f(x<sub>l</sub>)", "n", "fa"], ["f(x<sub>u</sub>)", "n", "fb"], ["f(x<sub>r</sub>)", "n", "fx"],
+       ["f(x<sub>l</sub>)·f(x<sub>r</sub>)", "n", "produto"],
+       ["erro relativo", "n", "erro"], ["erro (%)", "n", "erro_pct"]], r.tabela, classeFinal);
     h += '<p class="tabela-acoes"><button type="button" class="secundario btn-csv">Baixar tabela (CSV)</button></p>';
   }
   if (r.metodo === "newton" && r.tabela && r.tabela.length) {
     h += `<p class="nota">Derivada simbólica usada: <b>f′(x) = ${esc(r.derivada)}</b></p>`;
-    h += tabelaHtml("Tabela 1 – Iterações de Newton-Raphson (erro relativo " + esc(r.nome_erro) + ")",
-      [["k", "k", "k"], ["x<sub>k</sub>", "n", "x"], ["f(x<sub>k</sub>)", "n", "fx"], ["f′(x<sub>k</sub>)", "n", "dfx"], ["erro", "n", "erro"]], r.tabela, classeFinal);
+    h += tabelaHtml("Tabela 1 – Iterações de Newton-Raphson",
+      [["i", "k", "i"], ["x<sub>i</sub>", "n", "x"], ["f(x<sub>i</sub>)", "n", "fx"],
+       ["f′(x<sub>i</sub>)", "n", "dfx"], ["x<sub>i+1</sub>", "n", "x_seguinte"],
+       ["erro relativo (%)", "n", "erro_pct"]], r.tabela, classeFinal);
     h += '<p class="tabela-acoes"><button type="button" class="secundario btn-csv">Baixar tabela (CSV)</button></p>';
   }
+  if (temPassos && r.conclusao) {
+    h += `<h3 class="passo"><span class="num">C</span> Conclusão</h3><p class="conclusao">${esc(r.conclusao)}</p>`;
+  }
+  if (r.ok && r.metodo !== "gauss") {
+    h += resumo([["f(x) na raiz", fmt(r.fraiz)], ["Iterações", r.iteracoes],
+      ["Ordem de convergência observada", r.ordem === null || r.ordem === undefined ? "—" : "p ≈ " + r.ordem.toFixed(2)]]);
+  }
+
   if (r.metodo === "gauss") h += renderGauss(r);
 
-  const temErros = (r.tabela || []).some((l) => l.erro !== null && l.erro !== undefined);
+  const temErros = (r.tabela || []).some((l) => l.erro_pct !== null && l.erro_pct !== undefined);
   const temConstrucao = r.curva && (r.metodo === "newton" || r.metodo === "falsa_posicao") && (r.tabela || []).length > 0;
   if (r.curva) {
     h += `<div class="barra-graficos"><h3>Gráficos</h3><div class="controles">
-        ${temConstrucao ? `<label><input type="checkbox" class="chk-geo"> Mostrar ${r.metodo === "newton" ? "retas tangentes" : "retas secantes"}</label>` : ""}
+        ${temConstrucao ? `<label><input type="checkbox" class="chk-geo" checked> Mostrar ${r.metodo === "newton" ? "retas tangentes" : "retas secantes"}</label>` : ""}
         <button type="button" class="secundario btn-replay">Reproduzir iterações</button>
         <button type="button" class="secundario btn-png-f">Baixar Figura 1 (PNG)</button>
         ${temErros ? '<button type="button" class="secundario btn-png-e">Baixar Figura 2 (PNG)</button>' : ""}</div></div>
       <p class="dica-zoom">Arraste sobre um gráfico pra dar zoom na região; duplo-clique ou "Resetar zoom" volta ao tamanho original.</p>
       <div class="graficos">
         <figure><canvas class="cv-f"></canvas><button type="button" class="btn-reset-zoom" hidden>↺ Resetar zoom</button><figcaption>Figura 1 – f(x), iterações (pontos azuis numerados) e raiz (ponto vermelho).</figcaption></figure>
-        ${temErros ? '<figure><canvas class="cv-e"></canvas><button type="button" class="btn-reset-zoom" hidden>↺ Resetar zoom</button><figcaption>Figura 2 – Erro relativo por iteração, em escala logarítmica.</figcaption></figure>' : ""}
+        ${temErros ? '<figure><canvas class="cv-e"></canvas><button type="button" class="btn-reset-zoom" hidden>↺ Resetar zoom</button><figcaption>Figura 2 – Erro relativo (%) por iteração, em escala logarítmica; linha pontilhada = tolerância.</figcaption></figure>' : ""}
       </div>`;
   }
   div.innerHTML = h;
+
+  // Navegador de passos: liga o painel de fórmula substituída, o destaque da linha na tabela
+  // e o limite de quantas retas de construção aparecem no gráfico.
+  if (temPassos) {
+    const linhasTbody = div.querySelectorAll(".tabela-rolagem tbody tr");
+    const segPorPasso = r.metodo === "newton" ? 2 : 1;
+    ligarNavegacao(div, r.tabela.length, (atual, tudo) => {
+      const alvo = div.querySelector(".conteudo-passo");
+      if (tudo) {
+        alvo.innerHTML = r.tabela.map((l) =>
+          `<p class="formula-linha"><b>${r.metodo === "newton" ? "i = " + l.i : "k = " + l.k}.</b> ${esc(l.formula || "—")}</p>`).join("");
+      } else {
+        const linha = r.tabela[atual];
+        alvo.innerHTML = `<p class="formula-linha">${esc((linha && linha.formula) || "—")}</p>`;
+      }
+      linhasTbody.forEach((tr, i) => tr.classList.toggle("linha-atual", !tudo && i === atual));
+      opcoesGrafico.limite = tudo ? null : (atual + 1) * segPorPasso;
+      if (graficosAtuais) animar(graficosAtuais, 0);
+    });
+  }
 
   // Baixar tabela de iterações como CSV (falsa posição / Newton)
   div.querySelectorAll(".btn-csv").forEach((btn) => {
     btn.addEventListener("click", () => {
       const ehNewton = r.metodo === "newton";
-      const cabecalhos = ehNewton ? ["k", "x_k", "f(x_k)", "f'(x_k)", "erro"] : ["k", "a", "b", "x_k", "f(x_k)", "erro"];
-      const chaves = ehNewton ? ["k", "x", "fx", "dfx", "erro"] : ["k", "a", "b", "x", "fx", "erro"];
+      const cabecalhos = ehNewton
+        ? ["i", "x_i", "f(x_i)", "f'(x_i)", "x_i+1", "erro_%"]
+        : ["k", "xl", "xu", "xr", "f(xl)", "f(xu)", "f(xr)", "f(xl)_vezes_f(xr)", "erro", "erro_%"];
+      const chaves = ehNewton
+        ? ["i", "x", "fx", "dfx", "x_seguinte", "erro_pct"]
+        : ["k", "a", "b", "x", "fa", "fb", "fx", "produto", "erro", "erro_pct"];
       baixarTexto(`${r.metodo}-iteracoes.csv`, linhasParaCSV(cabecalhos, chaves, r.tabela), "text/csv;charset=utf-8;");
     });
   });
@@ -237,28 +335,31 @@ function renderizar(div, r) {
 
   graficosAtuais = null;
   opcoesGrafico.geo = false;
+  opcoesGrafico.limite = null;
   if (r.curva) {
+    const chk = div.querySelector(".chk-geo");
+    opcoesGrafico.geo = !!(chk && chk.checked);
     const desloca = r.metodo === "newton" ? 0 : 1; // numeração das iterações (Newton começa em k = 0)
     const pts = (r.pontos || []).map((x, i) => ({ x, y: r.tabela && r.tabela[i] ? r.tabela[i].fx : null, k: i + desloca }));
-    const erros = (r.tabela || []).filter((l) => l.erro !== null && l.erro !== undefined && l.erro >= 0).map((l) => [l.k, l.erro]);
-    graficosAtuais = [criarGraficoFuncao(div.querySelector(".cv-f"), r.curva, pts, r.ok ? r.raiz : null, segmentosConstrucao(r))];
-    if (temErros) graficosAtuais.push(criarGraficoErro(div.querySelector(".cv-e"), erros));
+    const erros = (r.tabela || [])
+      .filter((l) => l.erro_pct !== null && l.erro_pct !== undefined && l.erro_pct >= 0)
+      .map((l) => [l.k ?? l.i, l.erro_pct]);
+    const rotuloConstrucao = r.metodo === "newton" ? "reta tangente" : "reta secante";
+    graficosAtuais = [criarGraficoFuncao(div.querySelector(".cv-f"), r.curva, pts, r.ok ? r.raiz : null, segmentosConstrucao(r), rotuloConstrucao)];
+    if (temErros) graficosAtuais.push(criarGraficoErro(div.querySelector(".cv-e"), erros, r.tolerancia_pct));
     animar(graficosAtuais, 700);
     div.querySelector(".btn-replay").addEventListener("click", () => animar(graficosAtuais, 3500));
-    const chk = div.querySelector(".chk-geo");
     if (chk) chk.addEventListener("change", () => { opcoesGrafico.geo = chk.checked; animar(graficosAtuais, 0); });
     div.querySelector(".btn-png-f").addEventListener("click", () => baixarCanvasPNG(div.querySelector(".cv-f"), `${r.metodo}-grafico.png`));
     const btnPngE = div.querySelector(".btn-png-e");
     if (btnPngE) btnPngE.addEventListener("click", () => baixarCanvasPNG(div.querySelector(".cv-e"), `${r.metodo}-erro.png`));
   }
-  // Gauss: expandir/recolher todos os passos
-  const abrir = div.querySelector("[data-abrir]");
-  if (abrir) {
-    abrir.addEventListener("click", () => {
-      const abrirTudo = abrir.dataset.abrir === "1";
-      div.querySelectorAll("details").forEach((d) => (d.open = abrirTudo));
-      abrir.dataset.abrir = abrirTudo ? "0" : "1";
-      abrir.textContent = abrirTudo ? "Recolher todos" : "Expandir todos";
+  // Gauss: navegador de passos (abre só o passo atual; "Mostrar tudo" abre todos de uma vez)
+  if (r.passos && r.passos.length) {
+    const detalhes = div.querySelectorAll(".passo-gauss");
+    ligarNavegacao(div, r.passos.length, (atual, tudo) => {
+      detalhes.forEach((d, i) => (d.open = tudo || i === atual));
+      if (!tudo) detalhes[atual].scrollIntoView({ behavior: reduzirMovimento ? "auto" : "smooth", block: "nearest" });
     });
   }
 }
@@ -267,11 +368,12 @@ function renderizar(div, r) {
 function segmentosConstrucao(r) {
   const seg = [], t = r.tabela || [];
   if (r.metodo === "newton") {
-    for (let i = 0; i < t.length - 1; i++) {
-      if (t[i].fx === null) continue;
-      seg.push({ x1: t[i].x, y1: t[i].fx, x2: t[i + 1].x, y2: 0, tipo: "reta" });          // tangente
-      seg.push({ x1: t[i + 1].x, y1: 0, x2: t[i + 1].x, y2: t[i + 1].fx || 0, tipo: "guia" }); // guia vertical
-    }
+    t.forEach((linha, i) => {
+      if (linha.fx === null || linha.x_seguinte === null) return;
+      const fxSeguinte = i + 1 < t.length ? t[i + 1].fx : (r.ok ? r.fraiz : null);
+      seg.push({ x1: linha.x, y1: linha.fx, x2: linha.x_seguinte, y2: 0, tipo: "reta" });            // tangente
+      seg.push({ x1: linha.x_seguinte, y1: 0, x2: linha.x_seguinte, y2: fxSeguinte || 0, tipo: "guia" }); // guia vertical
+    });
   } else if (r.metodo === "falsa_posicao") {
     t.forEach((l) => {
       const fa = interpolar(r.curva, l.a), fb = interpolar(r.curva, l.b);
@@ -294,14 +396,17 @@ function renderGauss(r) {
       ["Conferência com numpy.linalg.solve", `diferença máxima ${fmt(r.diferenca_numpy)}`]]);
     h += '<p class="tabela-acoes"><button type="button" class="secundario btn-csv-gauss">Baixar solução (CSV)</button></p>';
   }
-  if (r.passos) {
-    h += `<div class="passos-barra"><h3>Passo a passo (matriz aumentada [A | b])</h3><button type="button" class="secundario" data-abrir="1">Expandir todos</button></div>`;
+  if (r.passos && r.passos.length) {
+    h += `<h3 class="passo"><span class="num">P</span> Passo a passo (eliminação, matriz aumentada [A | b])</h3>`;
+    h += barraNavegacao(r.passos.length);
     r.passos.forEach((p, i) => {
-      h += `<details class="passo-gauss"${i === 0 ? " open" : ""}><summary>${esc(p.titulo)}</summary>`;
+      h += `<details class="passo-gauss" data-idx="${i}"${i === 0 ? " open" : ""}><summary>${esc(p.titulo)}</summary>`;
       if (p.pivo) h += `<p class="nota">Pivô: linha ${p.pivo.linha}, coluna ${p.pivo.coluna}, valor <b>${fmt(p.pivo.valor)}</b></p>`;
       if (p.troca) h += `<p class="nota">Troca de linhas: L${p.troca[0]} ↔ L${p.troca[1]}</p>`;
-      if (p.multiplicadores.length)
-        h += '<p class="nota">Multiplicadores: ' + p.multiplicadores.map((m) => `m<sub>${m.linha}</sub> = ${fmt(m.m)}`).join(" · ") + "</p>";
+      (p.operacoes || []).forEach((op) => {
+        h += `<p class="nota"><b>${esc(op.formula_linha)}</b></p>`;
+        h += '<ul class="contas-linha">' + op.contas.map((c) => `<li>${esc(c.formula)}</li>`).join("") + "</ul>";
+      });
       h += '<div class="tabela-rolagem"><table><tbody>';
       p.matriz.forEach((linha, li) => {
         h += "<tr>";
@@ -313,6 +418,17 @@ function renderGauss(r) {
       });
       h += "</tbody></table></div></details>";
     });
+  }
+  if (r.substituicao && r.substituicao.length) {
+    h += `<h3 class="passo"><span class="num">S</span> Substituição regressiva</h3>`;
+    h += r.substituicao.map((s) => `<p class="formula-linha">${esc(s.formula)}</p>`).join("");
+  }
+  if (r.prova_real && r.prova_real.length) {
+    h += `<h3 class="passo"><span class="num">R</span> Prova real (A·x comparado com b, equação original por equação)</h3>`;
+    h += r.prova_real.map((p) => `<p class="formula-linha${p.ok ? "" : " prova-falhou"}">${esc(p.formula)}</p>`).join("");
+  }
+  if (r.ok && r.conclusao) {
+    h += `<h3 class="passo"><span class="num">C</span> Conclusão</h3><p class="conclusao">${esc(r.conclusao)}</p>`;
   }
   return h;
 }
@@ -337,7 +453,7 @@ function prepararCanvas(cv) {
   return { g, W, H };
 }
 
-function criarGraficoFuncao(cv, curva, pts, raiz, construcao) {
+function criarGraficoFuncao(cv, curva, pts, raiz, construcao, rotuloConstrucao) {
   const { g, W, H } = prepararCanvas(cv);
   const mE = 52, mD = 14, mT = 22, mB = 30;
 
@@ -400,12 +516,15 @@ function criarGraficoFuncao(cv, curva, pts, raiz, construcao) {
 
     const progresso = t <= 0.6 ? 0 : (t - 0.6) / 0.4;
 
-    // construção geométrica (tangentes / secantes), se o usuário pediu
+    // construção geométrica (tangentes / secantes), se o usuário pediu; o navegador de passos
+    // pode limitar quantas aparecem (opcoesGrafico.limite), pra não "pular" direto pro final
     if (opcoesGrafico.geo && construcao.length) {
+      let quantos = Math.ceil(construcao.length * progresso);
+      if (opcoesGrafico.limite !== null && opcoesGrafico.limite !== undefined) quantos = Math.min(quantos, opcoesGrafico.limite);
       g.save();
       g.beginPath(); g.rect(mE, mT, W - mE - mD, H - mT - mB); g.clip();
       g.lineWidth = 1;
-      construcao.slice(0, Math.ceil(construcao.length * progresso)).forEach((s) => {
+      construcao.slice(0, quantos).forEach((s) => {
         g.strokeStyle = s.tipo === "reta" ? cor("--grafico-ponto") : cor("--grafico-grade");
         g.setLineDash(s.tipo === "reta" ? [] : [3, 3]);
         g.beginPath(); g.moveTo(X(s.x1), Y(s.y1)); g.lineTo(X(s.x2), Y(s.y2)); g.stroke();
@@ -429,6 +548,28 @@ function criarGraficoFuncao(cv, curva, pts, raiz, construcao) {
       g.fillStyle = cor("--grafico-raiz");
       g.beginPath(); g.arc(X(raiz), Y(0), 5.5, 0, 7); g.fill();
     }
+
+    // legenda (identidade das séries: nunca só por cor, aqui também pela forma/traço)
+    const legenda = [{ texto: "f(x)", cor: cor("--grafico-linha"), tipo: "linha" },
+                     { texto: "iterações", cor: cor("--grafico-ponto"), tipo: "ponto" }];
+    if (raiz !== null && raiz !== undefined) legenda.push({ texto: "raiz", cor: cor("--grafico-raiz"), tipo: "ponto" });
+    if (opcoesGrafico.geo && construcao.length && rotuloConstrucao) {
+      legenda.push({ texto: rotuloConstrucao, cor: cor("--grafico-ponto"), tipo: "tracejada" });
+    }
+    g.font = "11px system-ui, sans-serif";
+    let ly = mT + 6;
+    legenda.forEach((it) => {
+      const lx = W - mD - 100;
+      if (it.tipo === "ponto") {
+        g.fillStyle = it.cor; g.beginPath(); g.arc(lx, ly, 3.5, 0, 7); g.fill();
+      } else {
+        g.strokeStyle = it.cor; g.lineWidth = 2; g.setLineDash(it.tipo === "tracejada" ? [3, 3] : []);
+        g.beginPath(); g.moveTo(lx - 6, ly); g.lineTo(lx + 6, ly); g.stroke(); g.setLineDash([]);
+      }
+      g.fillStyle = cor("--grafico-texto");
+      g.fillText(it.texto, lx + 11, ly + 4);
+      ly += 15;
+    });
   }
   // dica ao passar o mouse: iteração mais próxima
   ligarDica(cv, (mx, my) => {
@@ -447,15 +588,17 @@ function criarGraficoFuncao(cv, curva, pts, raiz, construcao) {
   return { desenhar };
 }
 
-// Erro relativo por iteração, em escala log
-function criarGraficoErro(cv, erros) {
+// Erro relativo (%) por iteração, em escala log; tolPct (se dado) desenha a linha de referência ε
+function criarGraficoErro(cv, erros, tolPct) {
   const { g, W, H } = prepararCanvas(cv);
   const mE = 58, mD = 14, mT = 22, mB = 30;
   if (erros.length < 1) {
     return { desenhar() { g.clearRect(0, 0, W, H); g.fillStyle = cor("--grafico-texto"); g.fillText("Sem dados de erro para mostrar", 20, 30); } };
   }
+  const temTol = typeof tolPct === "number" && Number.isFinite(tolPct) && tolPct > 0;
+  const ltol = temTol ? Math.log10(tolPct) : null;
   const ls = erros.map((e) => Math.log10(Math.max(e[1], 1e-17)));
-  let lmin = Math.floor(Math.min(...ls)), lmax = Math.ceil(Math.max(...ls));
+  let lmin = Math.floor(Math.min(...ls, ...(temTol ? [ltol] : []))), lmax = Math.ceil(Math.max(...ls, ...(temTol ? [ltol] : [])));
   if (lmax === lmin) lmax += 1;
   let kmin = erros[0][0], kmax = erros[erros.length - 1][0];
   const vistaInicial = { xmin: kmin, xmax: kmax, ymin: lmin, ymax: lmax }; // pra "resetar zoom"
@@ -492,6 +635,17 @@ function criarGraficoErro(cv, erros) {
     g.stroke();
     g.fillStyle = cor("--grafico-linha");
     for (let i = 0; i < n; i++) { g.beginPath(); g.arc(pos[i].px, pos[i].py, 3, 0, 7); g.fill(); }
+
+    // linha de referência da tolerância ε: mostra visualmente onde o erro "cruzou" e parou
+    if (temTol && ltol >= lmin && ltol <= lmax) {
+      g.save();
+      g.strokeStyle = cor("--grafico-raiz"); g.lineWidth = 1.4; g.setLineDash([5, 4]);
+      g.beginPath(); g.moveTo(mE, Y(ltol)); g.lineTo(W - mD, Y(ltol)); g.stroke();
+      g.setLineDash([]);
+      g.fillStyle = cor("--grafico-raiz"); g.font = "11px system-ui, sans-serif";
+      g.fillText("ε = " + fmt(Number(tolPct.toPrecision(3))) + "%", W - mD - 92, Y(ltol) - 5);
+      g.restore();
+    }
   }
   ligarDica(cv, (mx, my) => {
     let melhor = null, dist = 14;
@@ -606,7 +760,7 @@ function baixarCanvasPNG(canvas, nomeArquivo) {
 function linhasParaCSV(cabecalhos, chaves, linhas) {
   const campo = (v) => {
     if (v === null || v === undefined) return "";
-    const s = String(v);
+    const s = String(typeof v === "object" && "valor" in v ? v.valor : v);
     return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   };
   const corpo = linhas.map((l) => chaves.map((k) => campo(l[k])).join(",")).join("\n");
@@ -713,7 +867,13 @@ function lerGrade() {
     if (inp.dataset.b !== undefined) b[inp.dataset.b] = inp.value;
     else A[inp.dataset.i][inp.dataset.j] = inp.value;
   });
-  return { A, b };
+  const sig = $("#gauss-sig").value.trim();
+  return {
+    A, b,
+    pivotear: $("#gauss-pivotear").checked,
+    modo_numero: $("#gauss-modo").value,
+    casas_sig: sig === "" ? null : parseInt(sig, 10),
+  };
 }
 
 function resolverGauss() {
@@ -733,6 +893,11 @@ function resolverGauss() {
   enviar($("#form-gauss button[type=submit]"), "/api/gauss", lerGrade(), $("#res-gauss"));
 }
 
+$("#gauss-modo").addEventListener("change", () => {
+  const ehFracao = $("#gauss-modo").value === "fracao";
+  $("#gauss-sig").disabled = ehFracao;
+  if (ehFracao) $("#gauss-sig").value = "";
+});
 $("#gauss-n").addEventListener("change", () => {
   const n = Math.min(10, Math.max(1, parseInt($("#gauss-n").value, 10) || 1));
   $("#gauss-n").value = n;
@@ -740,12 +905,20 @@ $("#gauss-n").addEventListener("change", () => {
 });
 $("#gauss-limpar").addEventListener("click", () => {
   montarGrade(parseInt($("#gauss-n").value, 10) || 1);
+  $("#gauss-pivotear").checked = true;
+  $("#gauss-modo").value = "decimal";
+  $("#gauss-sig").disabled = false;
+  $("#gauss-sig").value = "";
   vazio($("#res-gauss"), "Resolver");
 });
 $("#form-gauss").addEventListener("submit", (e) => { e.preventDefault(); resolverGauss(); });
 montarExemplos("#ex-gauss", EX_GAUSS, (v) => {
   $("#gauss-n").value = v.A.length;
   montarGrade(v.A.length, v.A, v.b);
+  $("#gauss-pivotear").checked = v.pivotear !== undefined ? v.pivotear : true;
+  $("#gauss-modo").value = v.modo_numero || "decimal";
+  $("#gauss-modo").dispatchEvent(new Event("change"));
+  $("#gauss-sig").value = v.casas_sig !== undefined && v.casas_sig !== null ? v.casas_sig : "";
   resolverGauss();
 });
 montarGrade(3, EX_GAUSS[1][2].A, EX_GAUSS[1][2].b);

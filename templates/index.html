@@ -26,12 +26,12 @@
 
       <details class="como">
         <summary>Como funciona</summary>
-        <div class="formula">x<sub>k</sub> = ( a·f(b) − b·f(a) ) / ( f(b) − f(a) )</div>
+        <div class="formula">x<sub>r</sub> = ( x<sub>l</sub>·f(x<sub>u</sub>) − x<sub>u</sub>·f(x<sub>l</sub>) ) / ( f(x<sub>u</sub>) − f(x<sub>l</sub>) )</div>
         <ul>
-          <li>Traça a reta que liga (a, f(a)) a (b, f(b)); o ponto onde ela corta o eixo x é a nova aproximação x<sub>k</sub>.</li>
-          <li>O extremo que tem o mesmo sinal de f(x<sub>k</sub>) é substituído por x<sub>k</sub>, e o processo se repete.</li>
-          <li><b>Condições:</b> f contínua em [a, b] e f(a)·f(b) &lt; 0 (Teorema de Bolzano).</li>
-          <li>A convergência é linear (ordem 1).</li>
+          <li>Traça a reta que liga (x<sub>l</sub>, f(x<sub>l</sub>)) a (x<sub>u</sub>, f(x<sub>u</sub>)); o ponto onde ela corta o eixo x é a nova aproximação x<sub>r</sub>.</li>
+          <li>O extremo que tem o mesmo sinal de f(x<sub>r</sub>) é substituído por x<sub>r</sub>, e o processo se repete.</li>
+          <li><b>Condições:</b> f contínua em [x<sub>l</sub>, x<sub>u</sub>] e f(x<sub>l</sub>)·f(x<sub>u</sub>) &lt; 0 (Teorema de Bolzano) — se isso falhar, não há garantia de raiz no intervalo.</li>
+          <li>A convergência é linear (ordem 1); é comum um dos extremos nunca ser substituído (ficar "preso").</li>
         </ul>
       </details>
 
@@ -64,7 +64,7 @@
             <div class="campo"><label for="fp-tol">Tolerância</label><input id="fp-tol" name="tol" value="1e-8"><small class="dica">Quanto menor, mais preciso</small></div>
             <div class="campo"><label for="fp-max">Máximo de iterações</label><input id="fp-max" name="max_iter" value="100"><small class="dica">Evita repetir para sempre</small></div>
           </div>
-          <p class="nota-criterio">Critério de parada: erro relativo |x<sub>k</sub> − x<sub>k−1</sub>| / |x<sub>k</sub>| ≤ tolerância. Os números aceitam <code>0,5</code>, <code>1e-8</code>, <code>1/3</code> e <code>pi/2</code>.</p>
+          <p class="nota-criterio">Critério de parada: erro relativo |x<sub>r</sub> − x<sub>r,anterior</sub>| / |x<sub>r</sub>| ≤ tolerância (mostrado em fração e também em %). O slide também cita |x<sub>u</sub> − x<sub>l</sub>| ≤ tolerância como alternativa; este programa usa o erro relativo entre x<sub>r</sub> consecutivos, como no exemplo do slide (a Conclusão de cada cálculo explica o porquê). Os números aceitam <code>0,5</code>, <code>1e-8</code>, <code>1/3</code> e <code>pi/2</code>.</p>
         </fieldset>
         <button type="submit" class="principal">Calcular</button>
       </form>
@@ -78,11 +78,11 @@
 
       <details class="como">
         <summary>Como funciona</summary>
-        <div class="formula">x<sub>k+1</sub> = x<sub>k</sub> − f(x<sub>k</sub>) / f′(x<sub>k</sub>)</div>
+        <div class="formula">x<sub>i+1</sub> = x<sub>i</sub> − f(x<sub>i</sub>) / f′(x<sub>i</sub>)</div>
         <ul>
-          <li>Em cada passo, a tangente ao gráfico em x<sub>k</sub> corta o eixo x em x<sub>k+1</sub>.</li>
+          <li><b>Interpretação geométrica:</b> a fórmula é a reta TANGENTE ao gráfico em x<sub>i</sub> (a aproximação de Taylor de 1ª ordem de f em torno de x<sub>i</sub>); x<sub>i+1</sub> é onde essa tangente corta o eixo x.</li>
           <li>A derivada f′(x) é calculada automaticamente (simbolicamente) e mostrada no resultado.</li>
-          <li><b>Condições:</b> f derivável, f′(x<sub>k</sub>) ≠ 0 e x₀ suficientemente próximo da raiz (convergência local).</li>
+          <li><b>Condições:</b> f derivável, f′(x<sub>i</sub>) ≠ 0 em cada passo (senão o método não pode continuar) e x₀ suficientemente próximo da raiz (convergência local).</li>
           <li>Numa raiz simples a convergência é quadrática (ordem 2); numa raiz múltipla vira linear.</li>
         </ul>
       </details>
@@ -112,10 +112,10 @@
           <legend><span class="num">2</span> Parâmetros</legend>
           <div class="grade-campos">
             <div class="campo"><label for="nw-x0">x₀ (chute inicial)</label><input id="nw-x0" name="x0" value="1,5"><small class="dica">Quanto mais perto da raiz, melhor</small></div>
-            <div class="campo"><label for="nw-tol">Tolerância</label><input id="nw-tol" name="tol" value="1e-8"><small class="dica">Quanto menor, mais preciso</small></div>
+            <div class="campo"><label for="nw-tol">Tolerância (em %)</label><input id="nw-tol" name="tol" value="1e-6"><small class="dica">Ex.: 1e-2 significa 1e-2 % = 0,0001 em fração</small></div>
             <div class="campo"><label for="nw-max">Máximo de iterações</label><input id="nw-max" name="max_iter" value="100"><small class="dica">Evita repetir para sempre</small></div>
           </div>
-          <p class="nota-criterio">Critério de parada: erro relativo |x<sub>k</sub> − x<sub>k−1</sub>| / |x<sub>k</sub>| ≤ tolerância. Os números aceitam <code>0,5</code>, <code>1e-8</code>, <code>1/3</code> e <code>pi/2</code>.</p>
+          <p class="nota-criterio">Critério de parada: erro relativo |x<sub>i+1</sub> − x<sub>i</sub>| / |x<sub>i+1</sub>| × 100 ≤ tolerância, já em PORCENTAGEM — igual ao pseudocódigo do slide. Os números aceitam <code>0,5</code>, <code>1e-8</code>, <code>1/3</code> e <code>pi/2</code>.</p>
         </fieldset>
         <button type="submit" class="principal">Calcular</button>
       </form>
@@ -135,6 +135,7 @@
           <li>Os elementos abaixo do pivô são zerados com os multiplicadores m<sub>i</sub>; depois a solução sai por substituição retroativa.</li>
           <li>Determinante = produto dos pivôs × (−1)<sup>trocas de linha</sup>.</li>
           <li>Se não há pivô, o sistema é classificado pelo Teorema de Rouché-Capelli: impossível ou indeterminado.</li>
+          <li>Com o pivoteamento desligado, cada etapa k usa sempre a linha k; se o elemento a<sub>kk</sub> for nulo, o programa avisa (em vez de dividir por zero).</li>
         </ul>
       </details>
 
@@ -150,6 +151,28 @@
           </div>
           <div id="gauss-grade"></div>
           <small class="dica">Preencha cada coeficiente de A e o termo independente b. Aceita frações (1/3) e vírgula decimal (0,5).</small>
+        </fieldset>
+        <fieldset>
+          <legend><span class="num">2</span> Opções</legend>
+          <div class="grade-campos">
+            <div class="campo">
+              <label><input type="checkbox" id="gauss-pivotear" checked style="width:auto"> Pivoteamento parcial</label>
+              <small class="dica">Desligue para reproduzir um exemplo "sem pivoteamento" (ordem natural das linhas)</small>
+            </div>
+            <div class="campo">
+              <label for="gauss-modo">Tipo de número</label>
+              <select id="gauss-modo">
+                <option value="decimal" selected>Decimal (ponto flutuante)</option>
+                <option value="fracao">Frações exatas</option>
+              </select>
+              <small class="dica">Frações exatas não aceitam π, e nem raízes irracionais</small>
+            </div>
+            <div class="campo">
+              <label for="gauss-sig">Algarismos significativos</label>
+              <input id="gauss-sig" type="number" min="1" max="15" placeholder="sem arredondar">
+              <small class="dica">Arredonda após CADA operação (mostra o efeito de pivô pequeno). Vazio = sem arredondar.</small>
+            </div>
+          </div>
         </fieldset>
         <div class="acoes">
           <button type="submit" class="principal">Resolver</button>

@@ -4,6 +4,7 @@ Rodar: python app.py   (abre em http://127.0.0.1:5001)
 """
 
 import math
+from fractions import Fraction
 
 import numpy as np
 from flask import Flask, jsonify, render_template, request
@@ -15,13 +16,15 @@ app.config["MAX_CONTENT_LENGTH"] = 1_000_000  # recusa pedidos gigantes
 
 
 def limpar(obj):
-    """Deixa o resultado seguro para JSON: NaN/Infinity viram None (null)."""
+    """Deixa o resultado seguro para JSON: NaN/Infinity viram None (null); Fraction vira {num, den, valor}."""
     if isinstance(obj, dict):
         return {k: limpar(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
         return [limpar(v) for v in obj]
     if isinstance(obj, np.generic):
         obj = obj.item()
+    if isinstance(obj, Fraction):
+        return {"num": obj.numerator, "den": obj.denominator, "valor": float(obj)}
     if isinstance(obj, float) and not math.isfinite(obj):
         return None
     return obj
@@ -75,7 +78,11 @@ def api_newton():
 @app.route("/api/gauss", methods=["POST"])
 def api_gauss():
     d = pegar_json()
-    return executar(metodos.gauss, d.get("A"), d.get("b"))
+    pivotear = bool(d.get("pivotear", True))
+    modo_numero = d.get("modo_numero") or "decimal"
+    casas_sig = d.get("casas_sig")
+    casas_sig = casas_sig if casas_sig not in ("", None, False) else None
+    return executar(metodos.gauss, d.get("A"), d.get("b"), pivotear, modo_numero, casas_sig)
 
 
 if __name__ == "__main__":

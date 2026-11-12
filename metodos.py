@@ -10,10 +10,16 @@ Conteúdo:
 Regra do arquivo: cada método é UMA função. Quando algo dá errado, a função
 levanta ErroCalculo com três partes: o que aconteceu, por que o método não
 aceita o caso (teoria) e o que o usuário pode fazer.
+
+Cada método devolve um HISTÓRICO estruturado (lista de passos com todos os
+valores intermediários e, em cada passo, uma string "formula" já com os
+números substituídos). O front-end (static/script.js) só renderiza esse
+histórico: nenhuma conta é refeita em JavaScript.
 """
 
 import math
 import re
+from fractions import Fraction
 
 import numpy as np
 import sympy as sp
@@ -277,6 +283,26 @@ def ler_numero(texto, nome):
     return valor
 
 
+def ler_fracao(texto, nome):
+    """Igual a ler_numero, mas devolve uma fractions.Fraction EXATA (para o modo 'frações exatas' do Gauss)."""
+    if texto is None or str(texto).strip() == "":
+        raise ErroCalculo("Campo vazio", f"O campo '{nome}' está vazio.", "Preencha o campo com um número.")
+    t = str(texto).strip().replace(",", ".")
+    expr = analisar_texto(t, permitir_x=False)
+    aproximado = float(expr.evalf(30))
+    if not math.isfinite(aproximado):
+        raise ErroCalculo("Número inválido", f"O campo '{nome}' não é um número finito.", "Digite um valor finito.")
+    valor = expr if expr.is_Rational else sp.nsimplify(expr.evalf(30), rational=True)
+    exato = getattr(valor, "is_Rational", False) and abs(float(valor) - aproximado) <= 1e-9 * max(1.0, abs(aproximado))
+    if not exato:
+        raise ErroCalculo(
+            "Valor não é uma fração exata",
+            f"O campo '{nome}' contém '{texto}', que não representa um número racional exato "
+            "(π, e e raízes irracionais não têm fração exata — só números inteiros e frações do tipo p/q).",
+            "No modo 'frações exatas', use números racionais: 1/3, 0,5, 7, etc. Ou troque para o modo decimal.")
+    return Fraction(int(valor.p), int(valor.q))
+
+
 def ler_tolerancia(texto):
     tol = ler_numero(texto, "tolerância")
     if tol <= 0 or tol < 1e-15:
@@ -300,12 +326,14 @@ def ler_max_iter(texto):
     return int(n)
 
 
-# Erro usado em todo o programa: ERRO RELATIVO  |x_k - x_(k-1)| / |x_k|
+# Erro usado na falsa posição: ERRO RELATIVO (fração)  |x_k - x_(k-1)| / |x_k|
 NOME_ERRO = "|x_k − x_(k−1)| / |x_k|"
+# Erro usado no Newton: mesma ideia, mas em PORCENTAGEM (como no pseudocódigo do slide)
+NOME_ERRO_NEWTON = "|x_(i+1) − x_i| / |x_(i+1)| × 100 (%)"
 
 
 def calcular_erro(xk, x_anterior):
-    """Erro relativo da iteração k. Devolve None na primeira (não há x anterior)."""
+    """Erro relativo (fração) entre dois valores. Devolve None se x_anterior for None."""
     if x_anterior is None:
         return None
     if xk == 0:                       # evita dividir por zero: usa o erro absoluto
@@ -336,6 +364,56 @@ def gerar_curva(avaliar, inicio, fim, n=600):
         fim = inicio + 1
     passo = (fim - inicio) / n
     return [[inicio + i * passo, avaliar(inicio + i * passo)] for i in range(n + 1)]
+
+
+# ----------------------------------------------------------------------
+# Formatação "em português" dos números dentro das fórmulas substituídas
+# (vírgula decimal). Usada só nos textos; os campos numéricos do JSON
+# continuam números normais (o front-end decide como exibi-los).
+# ----------------------------------------------------------------------
+def fmt_fracao(fr):
+    if fr.denominator == 1:
+        return str(fr.numerator)
+    return f"{fr.numerator}/{fr.denominator}"
+
+
+def fmt_br(v, sig=6):
+    """Formata um número para as strings de fórmula: vírgula decimal, poucos dígitos."""
+    if v is None:
+        return "—"
+    if isinstance(v, Fraction):
+        return fmt_fracao(v)
+    if v == 0:
+        return "0"
+    a = abs(v)
+    if a < 1e-4 or a >= 1e7:
+        texto = f"{float(v):.{max(sig - 1, 0)}e}"
+        base, expo = texto.split("e")
+        base = base.rstrip("0").rstrip(".") if "." in base else base
+        return f"{base}e{int(expo):+d}".replace(".", ",")
+    texto = f"{float(v):.{sig}g}"
+    return texto.replace(".", ",")
+
+
+def fmt_br_op(v):
+    """fmt_br, mas entre parênteses quando for fração não-inteira ou negativo (legibilidade dentro de contas)."""
+    texto = fmt_br(v)
+    precisa_parenteses = isinstance(v, Fraction) and v.denominator != 1
+    if not precisa_parenteses:
+        try:
+            precisa_parenteses = v < 0
+        except TypeError:
+            pass
+    return f"({texto})" if precisa_parenteses else texto
+
+
+def arredondar_sig(v, casas):
+    """Arredonda v para 'casas' algarismos significativos (modo do Gauss). None/0/Fraction passam direto."""
+    if casas is None or isinstance(v, Fraction) or v == 0:
+        return v
+    d = casas - 1 - math.floor(math.log10(abs(v)))
+    fator = 10.0 ** d
+    return round(v * fator) / fator
 
 
 # ----------------------------------------------------------------------
@@ -413,10 +491,10 @@ def _falsa_posicao(texto_f, texto_a, texto_b, texto_tol, texto_max, ctx):
     if a0 >= b0:
         raise ErroCalculo(
             "Intervalo inválido (a ≥ b)",
-            f"Passo 1: a falsa posição parte de um INTERVALO [a, b], não de um ponto só. "
-            f"Passo 2: aqui a = {a0:g} e b = {b0:g}, ou seja a não é menor que b. "
-            "Passo 3: sem a < b não existe um intervalo de verdade para aplicar o Teorema de Bolzano "
-            "nem para traçar a reta secante entre (a, f(a)) e (b, f(b)).",
+            f"Passo 1: a falsa posição parte de um INTERVALO [xl, xu], não de um ponto só. "
+            f"Passo 2: aqui xl = {a0:g} e xu = {b0:g}, ou seja xl não é menor que xu. "
+            "Passo 3: sem xl < xu não existe um intervalo de verdade para aplicar o Teorema de Bolzano "
+            "nem para traçar a reta secante entre (xl, f(xl)) e (xu, f(xu)).",
             "Troque os valores de a e b para que a seja menor que b.")
 
     fa, fb = avaliar(a0), avaliar(b0)
@@ -441,6 +519,7 @@ def _falsa_posicao(texto_f, texto_a, texto_b, texto_tol, texto_max, ctx):
             "avisos": [{"titulo": "O extremo já é raiz",
                         "explicacao": f"f({raiz:g}) = 0: o próprio extremo é a raiz, então não foi preciso iterar. "
                                       "Isto não é um erro."}],
+            "conclusao": f"O extremo {fmt_br(raiz)} já é raiz exata (f = 0). Nenhuma iteração foi necessária.",
             "mensagem": f"O extremo {raiz:g} já é raiz exata (f = 0). Nenhuma iteração necessária.",
         }
 
@@ -450,37 +529,53 @@ def _falsa_posicao(texto_f, texto_a, texto_b, texto_tol, texto_max, ctx):
             verificar_continuidade(avaliar, a0, b0)  # levanta o erro explicativo
     if fa * fb > 0:
         raise ErroCalculo(
-            "f(a)·f(b) > 0: Bolzano não garante raiz",
-            f"Passo 1: o programa calculou f(a) = {fa:.4g} e f(b) = {fb:.4g}. "
-            "Passo 2: os dois têm o MESMO sinal, ou seja f(a)·f(b) > 0. "
-            "Passo 3: o Teorema de Bolzano só garante uma raiz entre a e b quando f é contínua E "
-            "f(a)·f(b) < 0 (sinais opostos) — e essa segunda condição falhou aqui. "
+            "f(xl)·f(xu) ≥ 0: não há garantia de raiz no intervalo",
+            f"Passo 1: o programa calculou f(xl) = {fa:.4g} e f(xu) = {fb:.4g}. "
+            "Passo 2: os dois têm o MESMO sinal, ou seja f(xl)·f(xu) > 0. "
+            "Passo 3: o Teorema de Bolzano só garante uma raiz entre xl e xu quando f é contínua E "
+            "f(xl)·f(xu) < 0 (sinais opostos) — e essa segunda condição falhou aqui. "
             "Passo 4: isso não prova que não exista raiz no intervalo: pode haver um número par de "
             "raízes (a curva cruza o eixo duas vezes e volta ao mesmo sinal) ou a curva apenas tocar o "
             "eixo sem cruzar.",
-            "Escolha a e b onde f tenha sinais opostos (olhe o gráfico abaixo).")
+            "Escolha xl e xu onde f tenha sinais opostos (olhe o gráfico abaixo).")
     verificar_continuidade(avaliar, a0, b0)
 
-    # (b) iteração
+    # (b) iteração: cada linha mostra xl, xu, xr = (xl·f(xu) − xu·f(xl)) / (f(xu) − f(xl))
     a, b = a0, b0
     x_anterior = None
     tabela, xs = [], []
     convergiu = False
+    criterio = None
     x = fx = None
     for k in range(1, max_iter + 1):
-        x = (a * fb - b * fa) / (fb - fa)          # ponto onde a reta (a,fa)-(b,fb) corta o eixo x
+        x = (a * fb - b * fa) / (fb - fa)          # ponto onde a reta (xl,f(xl))-(xu,f(xu)) corta o eixo x
         fx = avaliar(x)
         if fx is None:
             raise ErroCalculo("f deixou de ser calculável", f"f({x:g}) não é finito.", "Revise o intervalo.")
         erro = calcular_erro(x, x_anterior)
-        tabela.append({"k": k, "a": a, "b": b, "x": x, "fx": fx, "erro": erro})
+        erro_pct = None if erro is None else erro * 100
+        produto = fa * fx
+        extremo = "xu" if produto < 0 else ("xl" if produto > 0 else None)
+        formula = (
+            f"xr = (xl·f(xu) − xu·f(xl)) / (f(xu) − f(xl)) "
+            f"= ({fmt_br(a)}·f({fmt_br(b)}) − {fmt_br(b)}·f({fmt_br(a)})) / (f({fmt_br(b)}) − f({fmt_br(a)})) "
+            f"= ({fmt_br(a)}·({fmt_br(fb)}) − {fmt_br(b)}·({fmt_br(fa)})) / ({fmt_br(fb)} − {fmt_br(fa)}) "
+            f"= {fmt_br(x)}"
+        )
+        tabela.append({"k": k, "a": a, "b": b, "x": x, "fa": fa, "fb": fb, "fx": fx,
+                       "produto": produto, "erro": erro, "erro_pct": erro_pct,
+                       "extremo_substituido": extremo, "largura_intervalo": abs(b - a),
+                       "formula": formula})
         xs.append(x)
-        if fx == 0 or (erro is not None and erro <= tol):
-            convergiu = True
+        if fx == 0:
+            convergiu, criterio = True, "raiz_exata"
             break
-        if fa * fx < 0:       # raiz entre a e x
+        if erro is not None and erro <= tol:
+            convergiu, criterio = True, "erro"
+            break
+        if produto < 0:       # raiz entre xl e xr
             b, fb = x, fx
-        else:                 # raiz entre x e b
+        else:                 # raiz entre xr e xu
             a, fa = x, fx
         x_anterior = x
 
@@ -509,9 +604,36 @@ def _falsa_posicao(texto_f, texto_a, texto_b, texto_tol, texto_max, ctx):
                           "Passo 3: isso acontece porque, na falsa posição, um dos extremos pode ficar "
                           "'preso', fazendo os passos encolherem mesmo com x ainda longe da raiz — por "
                           "isso aqui o erro pequeno não garante uma boa aproximação."})
+
+    # Nota sobre o critério |b - a| < ε citado no slide (não é usado aqui: ver critério de parada abaixo)
+    trocados = {row["extremo_substituido"] for row in tabela if row["extremo_substituido"]}
+    if trocados in ({"xl"}, {"xu"}):
+        lado_fixo = "xu" if trocados == {"xl"} else "xl"
+        nota_intervalo = (
+            f" O slide também cita |xu − xl| ≤ tolerância como critério alternativo de parada; aqui ele "
+            f"NÃO é usado porque o extremo {lado_fixo} nunca foi substituído durante a execução — o "
+            f"intervalo não encolhe até zero, só até |raiz − {lado_fixo}| ≈ {fmt_br(abs(b - a))}. Por isso "
+            "o critério de parada adotado é o erro relativo entre xr consecutivos."
+        )
+    else:
+        nota_intervalo = (
+            " O slide também cita |xu − xl| ≤ tolerância como critério alternativo; aqui o critério de "
+            "parada usado é o erro relativo entre xr consecutivos, como no exemplo do slide."
+        )
+
+    criterio_txt = {"erro": "o erro relativo entre xr consecutivos ficou ≤ tolerância",
+                    "raiz_exata": "f(xr) = 0 (raiz exata encontrada)"}[criterio]
+    verificacao = (", valor próximo de zero — confirma a raiz."
+                   if abs(fx) <= max(10 * tol, 1e-6) else
+                   ", ainda afastado de zero (veja o aviso acima sobre o extremo preso).")
+    conclusao = (f"Critério de parada: {criterio_txt} (parou na iteração k = {len(tabela)}). "
+                 f"Raiz aproximada: xr ≈ {fmt_br(x)}. Verificação: f(xr) = {fmt_br(fx)}" + verificacao
+                 + nota_intervalo)
+
     dados.update({
         "ok": True, "convergiu": True, "raiz": x, "fraiz": fx, "iteracoes": len(tabela), "ordem": p,
-        "avisos": avisos,
+        "avisos": avisos, "criterio_parada": criterio, "conclusao": conclusao,
+        "tolerancia_pct": tol * 100,
         "mensagem": f"Convergiu em {len(tabela)} iterações. Raiz ≈ {x:.10g}, f(raiz) = {fx:.3g}."
                     + (f" Ordem de convergência observada p ≈ {p:.2f}." if p is not None else ""),
     })
@@ -520,6 +642,12 @@ def _falsa_posicao(texto_f, texto_a, texto_b, texto_tol, texto_max, ctx):
 
 # ----------------------------------------------------------------------
 # 3. NEWTON-RAPHSON
+#
+# Cada linha i mostra xi, f(xi), f'(xi) e xi+1 = xi - f(xi)/f'(xi) JUNTOS
+# (como no slide), e o erro relativo da linha é |xi+1 - xi|/|xi+1| x 100,
+# EM PORCENTAGEM. A tolerância digitada é comparada direto com esse valor
+# percentual (ex.: ε = 1e-2 significa "1e-2 %"), igual ao pseudocódigo do
+# slide (que usa ea = ABS(...) * 100 e compara com es).
 # ----------------------------------------------------------------------
 def newton(texto_f, texto_x0, texto_tol, texto_max):
     expr = ler_funcao(texto_f)
@@ -527,12 +655,12 @@ def newton(texto_f, texto_x0, texto_tol, texto_max):
     f = criar_avaliador(expr)
     df = criar_avaliador(derivada)
     x = ler_numero(texto_x0, "x0")
-    tol = ler_tolerancia(texto_tol)
+    tol_pct = ler_tolerancia(texto_tol)
     max_iter = ler_max_iter(texto_max)
 
     tabela, xs = [], [x]
     dados = {"metodo": "newton", "tabela": tabela, "pontos": xs,
-             "nome_erro": NOME_ERRO, "derivada": str(derivada)}
+             "nome_erro": NOME_ERRO_NEWTON, "derivada": str(derivada)}
 
     def com_curva():
         """Completa os dados (gráfico) para a falha ou o sucesso."""
@@ -553,87 +681,107 @@ def newton(texto_f, texto_x0, texto_tol, texto_max):
             "Passo 3: sem f(x0) não há como montar a reta tangente nem calcular x1.",
             "Escolha um x0 onde f esteja definida.", extra=dados)
 
-    x_anterior = None
     convergiu = False
-    for k in range(0, max_iter + 1):
+    criterio = None
+    raiz = fraiz = None
+    for i in range(0, max_iter):
         fx = f(x)
         if fx is None:
-            tabela.append({"k": k, "x": x, "fx": None, "dfx": None, "erro": None})
+            tabela.append({"i": i, "x": x, "fx": None, "dfx": None, "x_seguinte": None,
+                           "erro_pct": None, "formula": None})
             com_curva()
             raise ErroCalculo(
-                "x_k saiu do domínio de f",
-                f"Passo 1: na iteração {k}, o método calculou x_k = {x:.6g}. "
-                "Passo 2: f(x_k) não é um número real — x_k caiu fora do domínio de f. "
-                "Passo 3: isso acontece porque o passo de Newton vem da reta TANGENTE, que não 'sabe' "
-                "onde f existe ou não; dependendo da inclinação, o passo pode empurrar x_k para fora do "
-                "domínio (por exemplo, log(x) com um x0 ruim pode gerar um x_k negativo).",
+                "x_i saiu do domínio de f",
+                f"Passo 1: na iteração {i}, o método calculou x_{i} = {x:.6g}. "
+                "Passo 2: f(x_i) não é um número real — x_i caiu fora do domínio de f. "
+                "Passo 3: isso acontece porque o passo de Newton vem da reta TANGENTE (a aproximação de "
+                "Taylor de 1ª ordem de f em x_i), que não 'sabe' onde f existe ou não; dependendo da "
+                "inclinação, o passo pode empurrar x_i para fora do domínio (por exemplo, log(x) com um "
+                "x0 ruim pode gerar um x_1 negativo).",
                 "Escolha um x0 mais próximo da raiz (olhe o gráfico).", extra=dados)
-        dfx = df(x)
-        erro = calcular_erro(x, x_anterior)
-        tabela.append({"k": k, "x": x, "fx": fx, "dfx": dfx, "erro": erro})
 
-        if fx == 0 or (erro is not None and erro <= tol):
-            convergiu = True
+        if fx == 0:
+            convergiu, criterio = True, "raiz_exata"
+            raiz, fraiz = x, fx
+            tabela.append({"i": i, "x": x, "fx": fx, "dfx": df(x), "x_seguinte": x,
+                           "erro_pct": 0.0,
+                           "formula": f"f(x_{i}) = 0 — x_{i} = {fmt_br(x)} já é raiz exata."})
             break
+
         if abs(x) > 1e6:
             com_curva()
             raise ErroCalculo(
                 "Divergência",
-                f"Passo 1: a sequência de x_k não parou de crescer em módulo (x_{k} ≈ {x:.3g}). "
+                f"Passo 1: a sequência de x_i não parou de crescer em módulo (x_{i} ≈ {x:.3g}). "
                 "Passo 2: Newton só tem convergência GARANTIDA quando x0 já está perto o bastante da "
                 "raiz (convergência local) — não há garantia nenhuma partindo de qualquer ponto. "
                 "Passo 3: fora dessa vizinhança, a reta tangente pode apontar cada vez mais para longe "
                 "da raiz em vez de se aproximar (ex.: atan(x) com |x0| grande, onde a tangente fica "
                 "quase horizontal).",
                 "Escolha um x0 mais próximo da raiz.", extra=dados)
-        # tangente (quase) horizontal: f'(x_k) minúsculo comparado a f(x_k)
+
+        dfx = df(x)
+        # tangente (quase) horizontal: f'(x_i) minúsculo comparado a f(x_i)
         if dfx is None or abs(dfx) < 1e-14 * max(abs(fx), 1e-300):
             com_curva()
             raise ErroCalculo(
-                "Derivada nula: f'(x_k) = 0",
-                f"Passo 1: em x_k = {x:.6g}, a derivada vale "
+                "Derivada nula: f'(x_i) = 0",
+                f"Passo 1: em x_i = {x:.6g}, a derivada vale "
                 f"{'indefinida' if dfx is None else format(dfx, '.3g')} — praticamente zero. "
-                "Passo 2: a fórmula de Newton é x_(k+1) = x_k − f(x_k)/f'(x_k); ela divide por f'(x_k). "
-                "Passo 3: com a tangente horizontal (f'(x_k) = 0) ela não corta o eixo x (ou corta "
-                "infinitamente longe), então não existe um x_(k+1) para continuar.",
+                "Passo 2: a fórmula de Newton é x_(i+1) = x_i − f(x_i)/f'(x_i); ela divide por f'(x_i). "
+                "Passo 3: com a tangente horizontal (f'(x_i) = 0) ela não corta o eixo x (ou corta "
+                "infinitamente longe), então não existe um x_(i+1) para continuar — o método não pode "
+                "continuar.",
                 "Escolha outro x0 onde f' ≠ 0.", extra=dados)
 
-        x_novo = x - fx / dfx
-        if not math.isfinite(x_novo):
-            xs.append(1e12)
+        x_seguinte = x - fx / dfx
+        if not math.isfinite(x_seguinte):
             com_curva()
             raise ErroCalculo(
                 "Divergência",
-                "Passo 1: ao calcular o próximo x_k, o resultado deixou de ser um número finito "
+                "Passo 1: ao calcular o próximo x_i, o resultado deixou de ser um número finito "
                 "(overflow). "
-                "Passo 2: é um caso extremo de divergência — a tangente empurrou x_k para um valor tão "
+                "Passo 2: é um caso extremo de divergência — a tangente empurrou x_i para um valor tão "
                 "grande que o computador não consegue mais representá-lo.",
                 "Escolha um x0 mais próximo da raiz.", extra=dados)
-        # ciclo: o novo valor já apareceu antes e ainda não convergimos
-        for antigo in xs[:-1] if len(xs) > 1 else []:
-            if abs(x_novo - antigo) <= 1e-12 * max(1.0, abs(antigo)):
-                xs.append(x_novo)
+
+        # ciclo: o novo valor já apareceu antes (numa iteração ANTERIOR, não a mais recente —
+        # ficar perto do x mais recente é só convergência normal) e ainda não convergimos
+        for antigo in xs[:-1]:
+            if abs(x_seguinte - antigo) <= 1e-12 * max(1.0, abs(antigo)):
+                xs.append(x_seguinte)
                 com_curva()
                 raise ErroCalculo(
                     "Ciclo detectado",
-                    f"Passo 1: o novo valor x_(k+1) = {x_novo:.6g} já havia aparecido antes nesta mesma "
-                    "sequência. "
+                    f"Passo 1: o novo valor x_(i+1) = {x_seguinte:.6g} já havia aparecido antes nesta "
+                    "mesma sequência. "
                     "Passo 2: isso significa que as iterações entraram num CICLO, alternando para "
                     "sempre entre os mesmos pontos (exemplo clássico: f(x) = x³ − 2x + 2 com x0 = 0 "
                     "alterna 0, 1, 0, 1, ...). "
                     "Passo 3: Newton não garante convergência quando x0 está longe da raiz — um ciclo "
                     "é uma forma de nunca convergir, mesmo sem nenhuma derivada nula no caminho.",
                     "Escolha outro x0 (olhe o gráfico).", extra=dados)
-        x_anterior = x
-        x = x_novo
-        xs.append(x)
+
+        erro_frac = calcular_erro(x_seguinte, x)
+        erro_pct = erro_frac * 100
+        formula = (f"x_{i + 1} = x_{i} − f(x_{i})/f'(x_{i}) = "
+                   f"{fmt_br(x)} − ({fmt_br(fx)})/({fmt_br(dfx)}) = {fmt_br(x_seguinte)}")
+        tabela.append({"i": i, "x": x, "fx": fx, "dfx": dfx, "x_seguinte": x_seguinte,
+                       "erro_pct": erro_pct, "formula": formula})
+        xs.append(x_seguinte)
+
+        if erro_pct <= tol_pct:
+            convergiu, criterio = True, "erro"
+            raiz, fraiz = x_seguinte, f(x_seguinte)
+            break
+        x = x_seguinte
 
     com_curva()
     if not convergiu:
         raise ErroCalculo(
             "Não convergiu no máximo de iterações",
             f"Passo 1: o programa rodou as {max_iter} iterações permitidas e o erro ainda é maior que "
-            f"{tol:g}. "
+            f"{tol_pct:g}%. "
             "Passo 2: isso costuma ter uma destas causas: (a) f não tem raiz real, como exp(x) > 0 "
             "para todo x; (b) x0 estava mal escolhido e a sequência anda sem convergir; ou (c) a raiz "
             "é múltipla (f(r) = f'(r) = 0), e nesse caso a convergência vira linear e bem mais lenta.",
@@ -651,11 +799,17 @@ def newton(texto_f, texto_x0, texto_tol, texto_max):
                           "Passo 3: quando a raiz é múltipla (f(r) = f'(r) = 0), a prova da "
                           "convergência quadrática deixa de valer e o método cai para convergência "
                           "linear, que é exatamente o que está sendo observado aqui."})
-    fx = tabela[-1]["fx"]
+
+    criterio_txt = "f(x_i) = 0 exatamente (raiz exata)" if criterio == "raiz_exata" else "o erro relativo (%) ficou ≤ tolerância"
+    verificacao = (", valor próximo de zero — confirma a raiz."
+                   if fraiz is not None and abs(fraiz) < 1e-6 else ", veja os avisos acima.")
+    conclusao = (f"Critério de parada: {criterio_txt} (i = {len(tabela) - 1}, {len(tabela)} iterações). "
+                 f"Raiz aproximada: x ≈ {fmt_br(raiz)}. Verificação: f(raiz) = {fmt_br(fraiz)}" + verificacao)
+
     dados.update({
-        "ok": True, "convergiu": True, "raiz": xs[-1], "fraiz": fx, "iteracoes": len(tabela) - 1,
-        "ordem": p, "avisos": avisos,
-        "mensagem": f"Convergiu em {len(tabela) - 1} iterações. Raiz ≈ {xs[-1]:.10g}, f(raiz) = {fx:.3g}."
+        "ok": True, "convergiu": True, "raiz": raiz, "fraiz": fraiz, "iteracoes": len(tabela),
+        "ordem": p, "avisos": avisos, "conclusao": conclusao, "tolerancia_pct": tol_pct,
+        "mensagem": f"Convergiu em {len(tabela)} iterações. Raiz ≈ {raiz:.10g}, f(raiz) = {fraiz:.3g}."
                     + (f" Ordem de convergência observada p ≈ {p:.2f}." if p is not None else ""),
     })
     return dados
@@ -663,9 +817,34 @@ def newton(texto_f, texto_x0, texto_tol, texto_max):
 
 # ----------------------------------------------------------------------
 # 4. ELIMINAÇÃO DE GAUSS COM PIVOTEAMENTO PARCIAL
+#
+# Opções:
+#   pivotear     -> True (padrão) usa pivoteamento parcial; False usa sempre
+#                   a linha k como pivô (ordem natural), igual ao Exemplo 1
+#                   do slide ("sem pivoteamento").
+#   modo_numero  -> "decimal" (padrão, float) ou "fracao" (fractions.Fraction,
+#                   aritmética exata — reproduz o Exemplo 1 do slide).
+#   casas_sig    -> None (padrão, sem arredondar) ou um inteiro 1..15: depois
+#                   de CADA operação elementar o valor é arredondado para
+#                   esse número de algarismos significativos (reproduz o
+#                   efeito de pivô pequeno dos Exemplos 3/4 do slide).
 # ----------------------------------------------------------------------
-def gauss(A_texto, b_texto):
+def gauss(A_texto, b_texto, pivotear=True, modo_numero="decimal", casas_sig=None):
     """A_texto: lista de linhas (cada uma lista de textos); b_texto: lista de textos."""
+    if modo_numero not in ("decimal", "fracao"):
+        raise ErroCalculo("Modo numérico inválido", f"'{modo_numero}' não é reconhecido.",
+                          "Use 'decimal' ou 'fracao'.")
+    if casas_sig is not None:
+        try:
+            casas_sig = int(casas_sig)
+        except (TypeError, ValueError):
+            casas_sig = None
+        if casas_sig is not None and not (1 <= casas_sig <= 15):
+            raise ErroCalculo("Número de algarismos significativos inválido",
+                              "O modo de arredondamento aceita de 1 a 15 algarismos significativos.",
+                              "Use um valor nesse intervalo, ou desligue esse modo.")
+    usa_fracao = modo_numero == "fracao"
+
     # --- validações de formato ---
     if not isinstance(A_texto, list) or len(A_texto) == 0:
         raise ErroCalculo("Matriz vazia", "Nenhuma matriz foi informada.", "Escolha n ≥ 1 e preencha os campos.")
@@ -684,8 +863,9 @@ def gauss(A_texto, b_texto):
         raise ErroCalculo("Vetor b incompatível",
                           f"A matriz é {n}×{n}, então b precisa ter {n} elementos.", "Ajuste o tamanho de b.")
 
-    A = [[ler_numero(A_texto[i][j], f"A[{i + 1}][{j + 1}]") for j in range(n)] for i in range(n)]
-    b = [ler_numero(b_texto[i], f"b[{i + 1}]") for i in range(n)]
+    ler = ler_fracao if usa_fracao else ler_numero
+    A = [[ler(A_texto[i][j], f"A[{i + 1}][{j + 1}]") for j in range(n)] for i in range(n)]
+    b = [ler(b_texto[i], f"b[{i + 1}]") for i in range(n)]
 
     if any(abs(v) > 1e100 for v in b + [v for linha in A for v in linha]):
         raise ErroCalculo("Valores grandes demais",
@@ -696,21 +876,41 @@ def gauss(A_texto, b_texto):
                           "Todos os coeficientes são zero: não existe pivô nenhum (posto 0).",
                           "Informe uma matriz com algum coeficiente diferente de zero.")
 
+    def arred(v):
+        return arredondar_sig(v, casas_sig) if not usa_fracao else v
+
     # --- eliminação ---
     M = [A[i][:] + [b[i]] for i in range(n)]               # matriz aumentada [A | b]
-    escala = max(abs(v) for linha in M for v in linha)
-    # pivô considerado zero se menor que ~ (epsilon de máquina) × n × maior |a_ij|
-    tol_piv = np.finfo(float).eps * n * max(abs(v) for linha in A for v in linha)
+    escala = float(max(abs(v) for linha in M for v in linha))
+    if usa_fracao:
+        tol_piv = Fraction(0)                               # fração: "zero" só quando é exatamente zero
+    else:
+        tol_piv = np.finfo(float).eps * n * max(abs(v) for linha in A for v in linha)
     passos = [{"titulo": "Matriz aumentada inicial", "pivo": None, "troca": None,
-               "multiplicadores": [], "matriz": [l[:] for l in M]}]
+               "multiplicadores": [], "operacoes": [], "matriz": [l[:] for l in M]}]
     pivos, trocas, linha = [], 0, 0
 
     for col in range(n):
         if linha >= n:
             break
-        # pivoteamento parcial: maior |elemento| da coluna, da linha atual para baixo
-        p = max(range(linha, n), key=lambda i: abs(M[i][col]))
+        if pivotear:
+            # pivoteamento parcial: maior |elemento| da coluna, da linha atual para baixo
+            p = max(range(linha, n), key=lambda i: abs(M[i][col]))
+        else:
+            p = linha  # sem pivoteamento: usa sempre a linha k (ordem natural), igual ao Exemplo 1 do slide
         if abs(M[p][col]) <= tol_piv:
+            if not pivotear:
+                raise ErroCalculo(
+                    "Pivô nulo (pivoteamento desligado)",
+                    f"Passo 1: na coluna {col + 1}, o elemento a{linha + 1}{col + 1} é zero (ou "
+                    "numericamente zero). "
+                    "Passo 2: sem pivoteamento, o método usa sempre a linha k como pivô da etapa k; com "
+                    "pivô zero, o multiplicador m = a_ik/a_kk ficaria indefinido (divisão por zero). "
+                    "Passo 3: isso não significa necessariamente que o sistema é singular — pode haver "
+                    "uma linha abaixo com elemento não nulo nessa coluna; só o pivoteamento está "
+                    "desligado.",
+                    "Ligue o pivoteamento parcial, ou reordene as equações manualmente.",
+                    extra={"passos": passos, "metodo": "gauss"})
             continue                                        # coluna sem pivô -> matriz singular
         troca = None
         if p != linha:
@@ -718,23 +918,39 @@ def gauss(A_texto, b_texto):
             troca = [linha + 1, p + 1]
             trocas += 1
         pivo = M[linha][col]
-        mults = []
+        mults, operacoes = [], []
         for i in range(linha + 1, n):
-            m = M[i][col] / pivo
-            mults.append({"linha": i + 1, "m": m})
-            for j in range(col, n + 1):
-                M[i][j] -= m * M[linha][j]
-            M[i][col] = 0.0
+            m = arred(M[i][col] / pivo)
+            mults.append({"linha": i + 1, "m": m,
+                          "formula": f"m{i + 1}{col + 1} = a{i + 1}{col + 1}/a{col + 1}{col + 1} = "
+                                     f"{fmt_br_op(M[i][col])}/{fmt_br_op(pivo)} = {fmt_br(m)}"})
+            contas = []
+            for j in range(col + 1, n + 1):
+                antes = M[i][j]
+                novo = arred(antes - m * M[linha][j])
+                destino = f"b{i + 1}" if j == n else f"a{i + 1}{j + 1}"
+                origem_piv = f"b{linha + 1}" if j == n else f"a{linha + 1}{j + 1}"
+                contas.append({
+                    "coluna": j, "antes": antes, "depois": novo,
+                    "formula": f"{destino} = {destino} − ({fmt_br(m)})·{origem_piv} = "
+                               f"{fmt_br_op(antes)} − ({fmt_br(m)})·{fmt_br_op(M[linha][j])} = {fmt_br(novo)}",
+                })
+                M[i][j] = novo
+            M[i][col] = type(M[i][col])(0) if not usa_fracao else Fraction(0)
+            operacoes.append({"linha": i + 1, "pivo_linha": linha + 1,
+                              "formula_linha": f"L{i + 1} ← L{i + 1} − ({fmt_br(m)})·L{linha + 1}",
+                              "contas": contas})
         pivos.append(pivo)
         passos.append({"titulo": f"Passo {len(pivos)}: coluna {col + 1}",
                        "pivo": {"linha": linha + 1, "coluna": col + 1, "valor": pivo},
-                       "troca": troca, "multiplicadores": mults, "matriz": [l[:] for l in M]})
+                       "troca": troca, "multiplicadores": mults, "operacoes": operacoes,
+                       "matriz": [l[:] for l in M]})
         linha += 1
 
     posto = linha
     if posto < n:
         # Rouché-Capelli: compara posto(A) com posto([A|b])
-        tol_b = 1e-9 * max(1.0, escala)
+        tol_b = Fraction(0) if usa_fracao else 1e-9 * max(1.0, escala)
         impossivel = any(abs(M[i][n]) > tol_b for i in range(posto, n))
         base = {"passos": passos, "posto": posto, "metodo": "gauss"}
         if impossivel:
@@ -759,14 +975,34 @@ def gauss(A_texto, b_texto):
             "infinitas soluções.",
             "Remova equações redundantes ou acrescente equações independentes.", extra=base)
 
-    # substituição retroativa
-    sol = [0.0] * n
+    # substituição retroativa: xi = (bi − soma a_ij·xj) / a_ii, linha por linha, com fórmula substituída
+    sol = [None] * n
+    substituicao = []
     for i in range(n - 1, -1, -1):
-        soma = sum(M[i][j] * sol[j] for j in range(i + 1, n))
-        sol[i] = (M[i][n] - soma) / M[i][i]
+        termos_txt = []
+        soma = M[i][n] * 0 if usa_fracao else 0.0
+        for j in range(i + 1, n):
+            termo = arred(M[i][j] * sol[j])
+            termos_txt.append(f"{fmt_br_op(M[i][j])}·{fmt_br_op(sol[j])}")
+            soma = arred(soma + termo)
+        xi = arred((M[i][n] - soma) / M[i][i])
+        sol[i] = xi
+        if termos_txt:
+            formula = (f"x{i + 1} = (b{i + 1} − ({' + '.join(termos_txt)})) / a{i + 1}{i + 1} = "
+                       f"({fmt_br_op(M[i][n])} − {fmt_br_op(soma)}) / {fmt_br_op(M[i][i])} = {fmt_br(xi)}")
+        else:
+            formula = f"x{i + 1} = b{i + 1} / a{i + 1}{i + 1} = {fmt_br_op(M[i][n])} / {fmt_br_op(M[i][i])} = {fmt_br(xi)}"
+        substituicao.append({"i": i + 1, "formula": formula, "valor": xi})
+    substituicao.reverse()  # ordem x1, x2, ..., xn para exibição
 
-    det = float(np.prod(pivos)) * (-1) ** trocas
-    An, bn, xn = np.array(A), np.array(b), np.array(sol)
+    det = pivos[0]
+    for pv in pivos[1:]:
+        det = det * pv
+    det = det * ((-1) ** trocas)
+
+    An = np.array([[float(v) for v in linha] for linha in A])
+    bn = np.array([float(v) for v in b])
+    xn = np.array([float(v) for v in sol])
     residuo = float(np.linalg.norm(An @ xn - bn))
     try:
         x_numpy = np.linalg.solve(An, bn)
@@ -774,6 +1010,25 @@ def gauss(A_texto, b_texto):
         x_numpy = np.full(n, np.nan)
     diferenca = float(np.max(np.abs(x_numpy - xn)))
     cond = float(np.linalg.cond(An))
+
+    # prova real: A·x comparado com b, equação por equação (com os coeficientes ORIGINAIS de A)
+    prova_real = []
+    todas_ok = True
+    for i in range(n):
+        termos_txt = [f"{fmt_br_op(A[i][j])}·{fmt_br_op(sol[j])}" for j in range(n)]
+        soma = A[i][0] * 0 if usa_fracao else 0.0
+        for j in range(n):
+            soma = arred(soma + A[i][j] * sol[j]) if not usa_fracao else soma + A[i][j] * sol[j]
+        if usa_fracao:
+            ok_linha = (soma == b[i])
+        else:
+            ok_linha = abs(soma - b[i]) <= 1e-6 * max(1.0, abs(b[i]))
+        todas_ok = todas_ok and ok_linha
+        prova_real.append({
+            "i": i + 1, "ok": ok_linha, "calculado": soma, "esperado": b[i],
+            "formula": f"{' + '.join(termos_txt)} = {fmt_br(soma)}  (b{i + 1} = {fmt_br(b[i])}) "
+                       + ("✓" if ok_linha else "✗"),
+        })
 
     avisos = []
     if cond > 1e10:
@@ -786,10 +1041,28 @@ def gauss(A_texto, b_texto):
                           "Passo 3: com cond(A) tão grande, até o arredondamento normal de ponto "
                           "flutuante pode virar um erro grande na resposta — por isso a solução pode "
                           "ter poucos dígitos corretos mesmo que o resíduo ‖Ax − b‖ pareça pequeno."})
+    if not todas_ok:
+        avisos.append({
+            "titulo": "A prova real não bateu em todas as equações",
+            "explicacao": "Passo 1: ao substituir a solução calculada nas equações ORIGINAIS, uma ou "
+                          "mais não resultaram em b (veja a tabela 'Prova real' abaixo). "
+                          "Passo 2: isso costuma acontecer quando um pivô muito pequeno (sem "
+                          "pivoteamento) amplifica o erro de arredondamento, ou quando o modo de "
+                          "algarismos significativos está arredondando agressivamente demais. "
+                          "Passo 3: ligue o pivoteamento parcial e/ou use mais algarismos significativos "
+                          "(ou o modo de frações exatas) para evitar isso."})
+
+    conclusao = (f"O sistema é possível e determinado (posto = {n} = número de incógnitas). Solução: "
+                 + "; ".join(f"x{i + 1} = {fmt_br(v)}" for i, v in enumerate(sol)) + ". Prova real: "
+                 + ("todas as equações bateram com b (ver tabela abaixo)." if todas_ok else
+                    "uma ou mais equações NÃO bateram com b — ver aviso e a tabela da prova real abaixo."))
+
     return {
         "ok": True, "metodo": "gauss", "n": n, "solucao": sol, "determinante": det, "posto": posto,
         "residuo": residuo, "solucao_numpy": [float(v) for v in x_numpy], "diferenca_numpy": diferenca,
-        "condicao": cond, "passos": passos, "avisos": avisos,
+        "condicao": cond, "passos": passos, "substituicao": substituicao, "prova_real": prova_real,
+        "avisos": avisos, "conclusao": conclusao, "pivotear": pivotear, "modo_numero": modo_numero,
+        "casas_sig": casas_sig,
         "mensagem": f"Sistema com solução única. Resíduo ||Ax − b|| = {residuo:.3g}; "
                     f"diferença máxima para numpy.linalg.solve = {diferenca:.3g}.",
     }
